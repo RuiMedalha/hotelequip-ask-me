@@ -4,6 +4,7 @@ import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 import { TypingIndicator } from "./TypingIndicator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Message {
   id: string;
@@ -12,16 +13,24 @@ interface Message {
   timestamp: Date;
 }
 
-const botResponses = [
-  "Olá! Bem-vindo à HotelEquip! Como posso ajudá-lo hoje?",
-  "Somos especialistas em equipamentos para hotéis, restaurantes e estabelecimentos de hospitalidade.",
-  "Temos uma vasta gama de produtos: equipamentos de cozinha profissional, mobiliário, sistemas de climatização, produtos de limpeza e muito mais.",
-  "Para mais informações específicas sobre nossos produtos, pode visitar o nosso site hotelequip.pt ou contactar-nos diretamente.",
-  "Está interessado em algum tipo específico de equipamento? Posso fornecer-lhe mais detalhes!",
-  "Os nossos produtos são de alta qualidade e adequados para estabelecimentos de todas as dimensões.",
-  "Também oferecemos serviços de instalação e manutenção para garantir o melhor funcionamento dos equipamentos.",
-  "Tem alguma dúvida específica sobre preços ou disponibilidade? Ficarei feliz em ajudar!"
-];
+// Função para consultar o Meilisearch via Supabase Edge Function
+const queryMeilisearch = async (query: string): Promise<string> => {
+  try {
+    const { data, error } = await supabase.functions.invoke('meilisearch-query', {
+      body: { query }
+    });
+
+    if (error) {
+      console.error('Erro na consulta Meilisearch:', error);
+      return "Desculpe, ocorreu um erro ao processar a sua pergunta. Pode tentar reformular?";
+    }
+
+    return data.response || "Não consegui encontrar uma resposta específica para a sua pergunta.";
+  } catch (error) {
+    console.error('Erro na comunicação com Meilisearch:', error);
+    return "Desculpe, não consegui processar a sua pergunta neste momento. Pode tentar novamente?";
+  }
+};
 
 export const Chatbot = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -60,19 +69,37 @@ export const Chatbot = () => {
     setMessages(prev => [...prev, userMessage]);
     setIsTyping(true);
 
-    // Simulate bot response delay
-    setTimeout(() => {
-      const randomResponse = botResponses[Math.floor(Math.random() * botResponses.length)];
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: randomResponse,
-        isUser: false,
-        timestamp: new Date(),
-      };
+    // Consultar Meilisearch para resposta inteligente
+    try {
+      const responseText = await queryMeilisearch(messageText);
+      
+      // Simular delay realista para digitação
+      setTimeout(() => {
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: responseText,
+          isUser: false,
+          timestamp: new Date(),
+        };
 
-      setMessages(prev => [...prev, botMessage]);
-      setIsTyping(false);
-    }, 1500 + Math.random() * 1000); // Random delay between 1.5-2.5s
+        setMessages(prev => [...prev, botMessage]);
+        setIsTyping(false);
+      }, 1000 + Math.random() * 1000); // Delay entre 1-2s
+    } catch (error) {
+      console.error('Erro ao processar mensagem:', error);
+      
+      setTimeout(() => {
+        const errorMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          text: "Desculpe, ocorreu um erro. Pode tentar novamente ou contactar-nos diretamente através do hotelequip.pt",
+          isUser: false,
+          timestamp: new Date(),
+        };
+
+        setMessages(prev => [...prev, errorMessage]);
+        setIsTyping(false);
+      }, 1000);
+    }
   };
 
   return (
