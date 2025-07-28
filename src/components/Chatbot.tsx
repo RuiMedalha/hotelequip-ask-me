@@ -121,7 +121,7 @@ export const Chatbot = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen max-w-2xl mx-auto bg-background border-x border-border">
+    <div className="flex flex-col h-full max-w-full bg-background">{/* Removido border-x e max-w-2xl para widget */}
       <ChatHeader />
       
       <ScrollArea ref={scrollAreaRef} className="flex-1 p-4">
