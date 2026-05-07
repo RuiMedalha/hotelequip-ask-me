@@ -1,11 +1,14 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://placeholder.supabase.co'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'placeholder-key'
+const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
 
-// Verificar se as variáveis de ambiente estão configuradas
-if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
-  console.warn('Supabase environment variables not found. Please check your Supabase integration.')
-}
+export const isSupabaseConfigured = Boolean(url && key);
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = createClient(
+  url || 'https://placeholder.supabase.co',
+  key || 'placeholder-key'
+);
+
+export const FUNCTIONS_URL = url ? `${url}/functions/v1` : '';
