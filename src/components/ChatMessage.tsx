@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown";
 
 interface ChatMessageProps {
   message: string;
@@ -22,7 +23,9 @@ export const ChatMessage = ({ message, isUser, timestamp }: ChatMessageProps) =>
             : "bg-chat-bubble-bot text-foreground mr-12 border border-border"
         )}
       >
-        <p className="text-sm leading-relaxed whitespace-pre-wrap">{message}</p>
+        <div className="text-sm leading-relaxed prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1">
+          <ReactMarkdown>{message}</ReactMarkdown>
+        </div>
         <span
           className={cn(
             "text-xs mt-1 block",
