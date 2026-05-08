@@ -144,6 +144,22 @@ async function executeTool(
   }
   if (name === "request_human_handoff") {
     const admin = adminClient();
+    // Guarda: exigir lead com nome + (email ou telefone) antes de transferir
+    const { data: lead } = await admin
+      .from("leads")
+      .select("name,email,phone")
+      .eq("conversation_id", ctx.conversationId)
+      .maybeSingle();
+    const hasName = !!lead?.name;
+    const hasEmail = !!lead?.email;
+    const hasPhone = !!(lead?.phone && /^\+?\d{8,}$/.test(String(lead.phone).replace(/\s/g, "")));
+    if (!hasName || (!hasEmail && !hasPhone)) {
+      return JSON.stringify({
+        error: "missing_contact",
+        instruction: "Antes de transferir, pede ao cliente: (1) nome, (2) email OU telefone com indicativo. Se ele der telefone, pergunta também se prefere continuar a conversa por WhatsApp ou aqui no chat. Depois chama save_lead e só então request_human_handoff.",
+        have: { name: hasName, email: hasEmail, phone: hasPhone },
+      });
+    }
     await admin.from("conversations").update({ status: "handoff" }).eq("id", ctx.conversationId);
     try {
       await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/handoff`, {
@@ -233,8 +249,17 @@ serve(async (req) => {
       await admin.from("messages").insert({ conversation_id: convId, role: "user", content: lastUser.content });
     }
 
+    const HANDOFF_POLICY = `
+
+POLÍTICA DE TRANSFERÊNCIA PARA HUMANO (obrigatória):
+- Quando o cliente pedir para falar com humano (ou for óbvio que precisa), NÃO chames request_human_handoff de imediato.
+- Primeiro, pergunta de forma simpática: o nome (se ainda não tiveres) e email OU telefone com indicativo (ex: +351 9XX XXX XXX) para o colega o poder contactar.
+- Se ele der telefone, pergunta também: "Prefere continuar a conversa por WhatsApp ou aqui no chat?".
+- Assim que tiveres nome + (email ou telefone), chama save_lead com esses dados, e só depois chama request_human_handoff com um resumo curto.
+- Nunca inventes contactos. Se o cliente recusar dar contacto, podes transferir mesmo assim mas explica que o agente só poderá responder enquanto ele mantiver o chat aberto.`;
+
     const conversation: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: systemPrompt + HANDOFF_POLICY },
       ...userMessages,
     ];
 
