@@ -169,26 +169,43 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
     // Path B: fallback via admin API se não houver Website token configurado
     if (!result.chatwoot?.ok && hasPhone && cwUrl && cwAcc && cwInbox && cwToken) {
       try {
+        const contactPayload = {
+          inbox_id: Number(cwInbox),
+          name: inferred.name || `Visitante ${conv?.visitor_id?.slice(0, 8)}`,
+          email: inferred.email || undefined,
+          phone_number: inferred.phone,
+          identifier: conv?.visitor_id,
+        };
         const contactRes = await fetchWithTimeout(`${cwUrl}/api/v1/accounts/${cwAcc}/contacts`, {
           method: "POST",
           headers: { "Content-Type": "application/json", api_access_token: cwToken },
-          body: JSON.stringify({
-            inbox_id: Number(cwInbox),
-            name: inferred.name || `Visitante ${conv?.visitor_id?.slice(0, 8)}`,
-            email: inferred.email || undefined,
-            phone_number: inferred.phone,
-            identifier: conv?.visitor_id,
-          }),
+          body: JSON.stringify(contactPayload),
         });
-        const contact = await safeJson(contactRes);
-        if (!contactRes.ok) throw new Error(`Chatwoot contact failed (${contactRes.status}): ${JSON.stringify(contact).slice(0, 300)}`);
-        const sourceId = contact.payload?.contact_inbox?.source_id || contact.payload?.contact?.id;
+        let contact = await safeJson(contactRes);
+        if (!contactRes.ok) {
+          const existing = await findExistingChatwootContact(cwUrl, cwAcc, cwToken, [inferred.phone, inferred.email], inferred.phone, inferred.email);
+          if (!existing) throw new Error(`Chatwoot contact failed (${contactRes.status}): ${JSON.stringify(contact).slice(0, 300)}`);
+          contact = { payload: { contact: existing } };
+        }
+        const contactId = getChatwootContactId(contact);
+        let sourceId = contact.payload?.contact_inbox?.source_id || getChatwootContactInboxes(contact).find((ci: any) => String(ci.inbox?.id) === String(cwInbox))?.source_id;
+        if (!sourceId && contactId) {
+          const contactInboxRes = await fetchWithTimeout(`${cwUrl}/api/v1/accounts/${cwAcc}/contacts/${contactId}/contact_inboxes`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", api_access_token: cwToken },
+            body: JSON.stringify({ inbox_id: Number(cwInbox), source_id: `he-${conversation_id}` }),
+          });
+          const contactInbox = await safeJson(contactInboxRes);
+          if (!contactInboxRes.ok) throw new Error(`Chatwoot contact inbox failed (${contactInboxRes.status}): ${JSON.stringify(contactInbox).slice(0, 300)}`);
+          sourceId = contactInbox.source_id;
+        }
+        if (!sourceId || !contactId) throw new Error("Chatwoot contact missing source_id/contact_id");
         const convRes = await fetchWithTimeout(`${cwUrl}/api/v1/accounts/${cwAcc}/conversations`, {
           method: "POST",
           headers: { "Content-Type": "application/json", api_access_token: cwToken },
           body: JSON.stringify({
             source_id: String(sourceId), inbox_id: Number(cwInbox),
-            contact_id: contact.payload?.contact?.id || contact.payload?.id,
+            contact_id: contactId,
             additional_attributes: { reason, summary },
           }),
         });
@@ -205,7 +222,7 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
           mode: "human",
           status: "handoff",
           chatwoot_conversation_id: cwConv.id,
-          chatwoot_contact_id: contact.payload?.contact?.id || contact.payload?.id,
+          chatwoot_contact_id: contactId,
           chatwoot_source_id: String(sourceId),
         }).eq("id", conversation_id);
         result.chatwoot = { ok: true, channel: "phone-inbox", conversation_id: cwConv.id };
