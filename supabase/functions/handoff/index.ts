@@ -101,8 +101,20 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
           const lang = settings.meta_wa_template_lang || "pt_PT";
           if (!token || !phoneId) throw new Error("Meta: missing access_token or phone_number_id");
           const to = waNumber.replace(/\D/g, "");
+          const components: any[] = [
+            { type: "body", parameters: [{ type: "text", text: msgBody.slice(0, 1000) }] },
+          ];
+          const cwConvId = result.chatwoot?.conversation_id;
+          if (cwConvId) {
+            components.push({
+              type: "button",
+              sub_type: "url",
+              index: "0",
+              parameters: [{ type: "text", text: String(cwConvId) }],
+            });
+          }
           const payload: any = template
-            ? { messaging_product: "whatsapp", to, type: "template", template: { name: template, language: { code: lang }, components: [{ type: "body", parameters: [{ type: "text", text: msgBody.slice(0, 1000) }] }] } }
+            ? { messaging_product: "whatsapp", to, type: "template", template: { name: template, language: { code: lang }, components } }
             : { messaging_product: "whatsapp", to, type: "text", text: { body: msgBody } };
           const r = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
             method: "POST",
