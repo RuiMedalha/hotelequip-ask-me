@@ -74,6 +74,20 @@ export default function Admin() {
     const r = await callFn("test-woocommerce", { store_url: settings.woo_store_url, consumer_key: ck, consumer_secret: cs });
     toast({ title: r.ok ? "WC OK" : "WC falhou", description: JSON.stringify(r.sample || r).slice(0, 200) });
   };
+  const testChatwoot = async () => {
+    const tok = prompt("Cola o Chatwoot API access token (não é guardado agora):") || "";
+    if (!tok) return;
+    const r = await callFn("test-chatwoot", {
+      url: settings.chatwoot_url,
+      account_id: settings.chatwoot_account_id,
+      inbox_id: settings.chatwoot_inbox_id,
+      api_token: tok,
+    });
+    toast({
+      title: r.ok ? "Chatwoot OK ✅" : `Falhou (${r.step || "?"})`,
+      description: r.ok ? r.message : JSON.stringify(r.error || r).slice(0, 250),
+    });
+  };
 
   const SecretField = ({ keyName, label, placeholder }: { keyName: string; label: string; placeholder?: string }) => {
     const [v, setV] = useState("");
