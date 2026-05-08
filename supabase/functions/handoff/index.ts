@@ -173,8 +173,19 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
             body: JSON.stringify({ content: fullText, message_type: "outgoing", private: true }),
           });
         }
+        await admin.from("conversations").update({
+          mode: "human",
+          status: "handoff",
+          chatwoot_conversation_id: cwConv.id,
+          chatwoot_contact_id: contact.payload?.contact?.id || contact.payload?.id,
+          chatwoot_source_id: String(sourceId),
+        }).eq("id", conversation_id);
         result.chatwoot = { ok: true, channel: "phone-inbox", conversation_id: cwConv.id };
       } catch (e: any) { result.chatwoot = { ok: false, channel: "phone-inbox", error: e.message }; }
+    }
+
+    if (!result.chatwoot) {
+      result.chatwoot = { ok: false, error: "Chatwoot not configured: missing chatwoot_url/chatwoot_website_token or admin API settings" };
     }
 
     // WhatsApp
