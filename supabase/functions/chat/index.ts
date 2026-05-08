@@ -74,7 +74,7 @@ const TOOLS = [
 async function executeTool(
   name: string,
   args: any,
-  ctx: { conversationId: string; settings: Record<string, any> }
+  ctx: { conversationId: string; settings: Record<string, any>; sessionLeadSaved: { value: boolean } }
 ): Promise<string> {
   if (name === "search_products") {
     const storeUrl = ctx.settings.woo_store_url || "";
