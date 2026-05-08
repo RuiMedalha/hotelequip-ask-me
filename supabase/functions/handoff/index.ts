@@ -45,13 +45,71 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
     const fullText = `🤖 Nova conversa para humano\n\nMotivo: ${reason}\nResumo: ${summary || "—"}\n\n${leadInfo}\n\n--- Transcrição ---\n${transcript}`;
 
     const result: any = {};
+    const hasPhone = !!(lead?.phone && /^\+?\d{8,}$/.test(String(lead.phone).replace(/\s/g, "")));
 
-    // Chatwoot
-    const cwUrl = settings.chatwoot_url;
+    // ===== Chatwoot =====
+    const cwUrl = (settings.chatwoot_url || "").replace(/\/$/, "");
     const cwAcc = settings.chatwoot_account_id;
     const cwInbox = settings.chatwoot_inbox_id;
     const cwToken = await getSecret("chatwoot_api_token");
-    if (cwUrl && cwAcc && cwInbox && cwToken) {
+    const websiteToken = settings.chatwoot_website_token;
+
+    // Path A: cliente SEM telefone -> Website Public API (chat continua dentro do widget)
+    if (!hasPhone && cwUrl && websiteToken) {
+      try {
+        const sourceId = `he-visitor-${conv?.visitor_id || conversation_id}`;
+        const contactRes = await fetchWithTimeout(`${cwUrl}/public/api/v1/inboxes/${websiteToken}/contacts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            source_id: sourceId,
+            name: lead?.name || `Visitante ${conv?.visitor_id?.slice(0, 8)}`,
+            email: lead?.email || undefined,
+          }),
+        });
+        const contact = await safeJson(contactRes);
+        if (!contactRes.ok) throw new Error(`Website contact failed (${contactRes.status}): ${JSON.stringify(contact).slice(0, 300)}`);
+        const pubsubToken = contact.pubsub_token;
+        const contactId = contact.id;
+
+        const convRes = await fetchWithTimeout(`${cwUrl}/public/api/v1/inboxes/${websiteToken}/contacts/${sourceId}/conversations`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const cwConv = await safeJson(convRes);
+        if (!convRes.ok) throw new Error(`Website conversation failed (${convRes.status}): ${JSON.stringify(cwConv).slice(0, 300)}`);
+        const cwConvId = cwConv.id;
+
+        await fetchWithTimeout(`${cwUrl}/public/api/v1/inboxes/${websiteToken}/contacts/${sourceId}/conversations/${cwConvId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: `--- Contexto da conversa com o bot ---\nMotivo: ${reason}\nResumo: ${summary || "—"}\n${leadInfo}\n\n${transcript}` }),
+        });
+
+        if (cwAcc && cwToken && cwConvId) {
+          await fetchWithTimeout(`${cwUrl}/api/v1/accounts/${cwAcc}/conversations/${cwConvId}/messages`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", api_access_token: cwToken },
+            body: JSON.stringify({ content: fullText, message_type: "outgoing", private: true }),
+          });
+        }
+
+        await admin.from("conversations").update({
+          mode: "human",
+          status: "handoff",
+          chatwoot_conversation_id: cwConvId,
+          chatwoot_contact_id: contactId,
+          chatwoot_source_id: sourceId,
+          chatwoot_pubsub_token: pubsubToken,
+        }).eq("id", conversation_id);
+
+        result.chatwoot = { ok: true, channel: "website", conversation_id: cwConvId };
+      } catch (e: any) { result.chatwoot = { ok: false, channel: "website", error: e.message }; }
+    }
+
+    // Path B: cliente COM telefone -> contacto/conversa via admin API (+ notificação WhatsApp em baixo)
+    if (hasPhone && cwUrl && cwAcc && cwInbox && cwToken) {
       try {
         const contactRes = await fetchWithTimeout(`${cwUrl}/api/v1/accounts/${cwAcc}/contacts`, {
           method: "POST",
@@ -60,7 +118,7 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
             inbox_id: Number(cwInbox),
             name: lead?.name || `Visitante ${conv?.visitor_id?.slice(0, 8)}`,
             email: lead?.email || undefined,
-            phone_number: lead?.phone || `+35199${Date.now().toString().slice(-7)}`,
+            phone_number: lead?.phone,
             identifier: conv?.visitor_id,
           }),
         });
@@ -79,15 +137,14 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
         const cwConv = await safeJson(convRes);
         if (!convRes.ok) throw new Error(`Chatwoot conversation failed (${convRes.status}): ${JSON.stringify(cwConv).slice(0, 300)}`);
         if (cwConv.id) {
-          const noteRes = await fetchWithTimeout(`${cwUrl}/api/v1/accounts/${cwAcc}/conversations/${cwConv.id}/messages`, {
+          await fetchWithTimeout(`${cwUrl}/api/v1/accounts/${cwAcc}/conversations/${cwConv.id}/messages`, {
             method: "POST",
             headers: { "Content-Type": "application/json", api_access_token: cwToken },
             body: JSON.stringify({ content: fullText, message_type: "outgoing", private: true }),
           });
-          if (!noteRes.ok) throw new Error(`Chatwoot note failed (${noteRes.status}): ${JSON.stringify(await safeJson(noteRes)).slice(0, 300)}`);
         }
-        result.chatwoot = { ok: true, conversation_id: cwConv.id };
-      } catch (e: any) { result.chatwoot = { ok: false, error: e.message }; }
+        result.chatwoot = { ok: true, channel: "phone-inbox", conversation_id: cwConv.id };
+      } catch (e: any) { result.chatwoot = { ok: false, channel: "phone-inbox", error: e.message }; }
     }
 
     // WhatsApp
