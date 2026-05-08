@@ -132,6 +132,8 @@ async function executeTool(
 
     if (existing) {
       await admin.from("leads").update(merged).eq("id", existing.id);
+      await admin.from("conversations").update({ lead_id: existing.id }).eq("id", ctx.conversationId);
+      ctx.sessionLeadSaved.value = true;
       return JSON.stringify({ ok: true, updated: true });
     }
     const { data: lead } = await admin
