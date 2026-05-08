@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
 export default function AdminLogin() {
@@ -12,7 +12,6 @@ export default function AdminLogin() {
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const nav = useNavigate();
   const { session, isAdmin, loading } = useAuth();
 
   if (!isSupabaseConfigured) {
