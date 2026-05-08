@@ -4,19 +4,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { useNavigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { useEffect } from "react";
 
 export default function AdminLogin() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const nav = useNavigate();
   const { session, isAdmin, loading } = useAuth();
-
-  // Redirect removido — fazia o input desmontar. Mostramos UI alternativa abaixo.
 
   if (!isSupabaseConfigured) {
     return (
@@ -39,16 +35,25 @@ export default function AdminLogin() {
     if (error) setErr(error.message);
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-secondary">
+        <Card className="p-6 max-w-md w-full">
+          <p className="text-sm text-muted-foreground">A validar sessão…</p>
+        </Card>
+      </div>
+    );
+  }
+
+  if (session && isAdmin) return <Navigate to="/admin" replace />;
+
   if (session) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-secondary">
         <Card className="p-6 max-w-md w-full space-y-3">
-          <h1 className="text-xl font-bold">Já tens sessão</h1>
-          <p className="text-sm text-muted-foreground">{session.user.email} — {isAdmin ? "admin" : "sem role admin"}</p>
-          <div className="flex gap-2">
-            {isAdmin && <Button onClick={() => nav("/admin")}>Ir para Admin</Button>}
-            <Button variant="outline" onClick={async () => { await supabase.auth.signOut(); }}>Logout</Button>
-          </div>
+          <h1 className="text-xl font-bold">Sessão sem permissões</h1>
+          <p className="text-sm text-muted-foreground">{session.user.email} não tem role admin.</p>
+          <Button variant="outline" onClick={async () => { await supabase.auth.signOut(); }}>Logout</Button>
         </Card>
       </div>
     );
