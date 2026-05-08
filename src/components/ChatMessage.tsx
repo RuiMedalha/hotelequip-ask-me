@@ -23,13 +23,28 @@ export const ChatMessage = ({ message, isUser, timestamp }: ChatMessageProps) =>
             : "bg-chat-bubble-bot text-foreground mr-12 border border-border"
         )}
       >
-        <div className="text-sm leading-relaxed prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-headings:my-2 prose-img:my-2 prose-img:rounded-lg prose-img:max-h-40 prose-a:text-primary">
+        <div className="text-sm leading-relaxed prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-headings:my-2 prose-img:my-2 prose-img:rounded-lg prose-img:max-h-40">
           <ReactMarkdown
             components={{
-              a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
-              img: ({ node, ...props }) => <img {...props} loading="lazy" alt={props.alt || ""} />,
+              a: ({ node, ...props }) => (
+                <a {...props} target="_blank" rel="noopener noreferrer" className="text-primary font-medium hover:underline" />
+              ),
+              h3: ({ node, children, ...props }) => (
+                <h3 {...props} className="text-base font-semibold mt-3 mb-1">{children}</h3>
+              ),
+              img: ({ node, ...props }) => <img {...props} loading="lazy" alt={props.alt || ""} className="rounded-lg max-h-40 my-2" />,
             }}
           >{message}</ReactMarkdown>
+          {!isUser && /\]\(https?:\/\//.test(message) && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {Array.from(message.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g)).slice(0, 4).map(([, label, url], i) => (
+                <a key={i} href={url} target="_blank" rel="noopener noreferrer"
+                   className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-full bg-primary text-primary-foreground hover:opacity-90 no-underline">
+                  Ver "{label.length > 28 ? label.slice(0, 28) + "…" : label}" →
+                </a>
+              ))}
+            </div>
+          )}
         </div>
         <span
           className={cn(
