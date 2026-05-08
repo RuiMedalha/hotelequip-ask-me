@@ -265,6 +265,7 @@ POLÍTICA DE TRANSFERÊNCIA PARA HUMANO (obrigatória):
     ];
 
     // Tool loop
+    const sessionLeadSaved = { value: false };
     let finalText = "";
     for (let i = 0; i < 5; i++) {
       let resp;
@@ -278,7 +279,7 @@ POLÍTICA DE TRANSFERÊNCIA PARA HUMANO (obrigatória):
       if (msg.tool_calls?.length) {
         for (const tc of msg.tool_calls) {
           const args = JSON.parse(tc.function.arguments || "{}");
-          const result = await executeTool(tc.function.name, args, { conversationId: convId, settings });
+          const result = await executeTool(tc.function.name, args, { conversationId: convId, settings, sessionLeadSaved });
           conversation.push({ role: "tool", tool_call_id: tc.id, name: tc.function.name, content: result });
         }
         continue;
