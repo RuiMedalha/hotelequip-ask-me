@@ -83,8 +83,8 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
     const cwToken = await getSecret("chatwoot_api_token");
     const websiteToken = settings.chatwoot_website_token;
 
-    // Path A: cliente SEM telefone -> Website Public API (chat continua dentro do widget)
-    if (!hasPhone && cwUrl && websiteToken) {
+    // Path A: Website Public API -> a conversa aparece no Chatwoot e continua dentro do widget
+    if (cwUrl && websiteToken) {
       try {
         const sourceId = `he-visitor-${conv?.visitor_id || conversation_id}`;
         const contactRes = await fetchWithTimeout(`${cwUrl}/public/api/v1/inboxes/${websiteToken}/contacts`, {
@@ -92,8 +92,9 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             source_id: sourceId,
-            name: lead?.name || `Visitante ${conv?.visitor_id?.slice(0, 8)}`,
-            email: lead?.email || undefined,
+            name: inferred.name || `Visitante ${conv?.visitor_id?.slice(0, 8)}`,
+            email: inferred.email || undefined,
+            phone_number: inferred.phone || undefined,
           }),
         });
         const contact = await safeJson(contactRes);
@@ -137,17 +138,17 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
       } catch (e: any) { result.chatwoot = { ok: false, channel: "website", error: e.message }; }
     }
 
-    // Path B: cliente COM telefone -> contacto/conversa via admin API (+ notificação WhatsApp em baixo)
-    if (hasPhone && cwUrl && cwAcc && cwInbox && cwToken) {
+    // Path B: fallback via admin API se não houver Website token configurado
+    if (!result.chatwoot?.ok && hasPhone && cwUrl && cwAcc && cwInbox && cwToken) {
       try {
         const contactRes = await fetchWithTimeout(`${cwUrl}/api/v1/accounts/${cwAcc}/contacts`, {
           method: "POST",
           headers: { "Content-Type": "application/json", api_access_token: cwToken },
           body: JSON.stringify({
             inbox_id: Number(cwInbox),
-            name: lead?.name || `Visitante ${conv?.visitor_id?.slice(0, 8)}`,
-            email: lead?.email || undefined,
-            phone_number: lead?.phone,
+            name: inferred.name || `Visitante ${conv?.visitor_id?.slice(0, 8)}`,
+            email: inferred.email || undefined,
+            phone_number: inferred.phone,
             identifier: conv?.visitor_id,
           }),
         });
