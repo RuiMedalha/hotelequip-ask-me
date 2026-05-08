@@ -8,6 +8,7 @@ const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
 export const isSupabaseConfigured = Boolean(url && key);
 
+export const SUPABASE_ANON_KEY = key;
 export const supabase = createClient(url, key);
 
 export const FUNCTIONS_URL = `${url}/functions/v1`;

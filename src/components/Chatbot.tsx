@@ -5,7 +5,7 @@ import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 import { TypingIndicator } from "./TypingIndicator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { supabase, FUNCTIONS_URL, isSupabaseConfigured } from "@/integrations/supabase/client";
+import { supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY, isSupabaseConfigured } from "@/integrations/supabase/client";
 
 interface Message { id: string; text: string; isUser: boolean; timestamp: Date; }
 
@@ -48,9 +48,14 @@ export const Chatbot = () => {
 
     try {
       if (!isSupabaseConfigured) throw new Error("Supabase não configurado. Vai a /admin/login para ligar.");
+      const { data: { session } } = await supabase.auth.getSession();
       const r = await fetch(`${FUNCTIONS_URL}/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        },
         body: JSON.stringify({ messages: newHistory, visitor_id: getVisitorId(), conversation_id: conversationId }),
       });
       const data = await r.json();
