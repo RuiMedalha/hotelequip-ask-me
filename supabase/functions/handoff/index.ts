@@ -91,23 +91,71 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
     // WhatsApp
     const waNumber = settings.whatsapp_number;
     const waMode = settings.whatsapp_mode || "link";
+    const msgBody = fullText.slice(0, 1500);
     if (waNumber) {
-      if (waMode === "twilio") {
-        const sid = await getSecret("twilio_account_sid");
-        const token = await getSecret("twilio_auth_token");
-        const from = await getSecret("twilio_whatsapp_from");
-        if (sid && token && from) {
-          try {
-            const auth = btoa(`${sid}:${token}`);
-            const body = new URLSearchParams({ To: `whatsapp:${waNumber}`, From: `whatsapp:${from}`, Body: fullText.slice(0, 1500) });
-            const r = await fetchWithTimeout(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
-              method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" }, body,
-            });
-            result.whatsapp = { ok: r.ok };
-          } catch (e: any) { result.whatsapp = { ok: false, error: e.message }; }
+      try {
+        if (waMode === "meta") {
+          const token = await getSecret("meta_wa_access_token");
+          const phoneId = settings.meta_wa_phone_number_id;
+          const template = settings.meta_wa_template;
+          const lang = settings.meta_wa_template_lang || "pt_PT";
+          if (!token || !phoneId) throw new Error("Meta: missing access_token or phone_number_id");
+          const to = waNumber.replace(/\D/g, "");
+          const payload: any = template
+            ? { messaging_product: "whatsapp", to, type: "template", template: { name: template, language: { code: lang }, components: [{ type: "body", parameters: [{ type: "text", text: msgBody.slice(0, 1000) }] }] } }
+            : { messaging_product: "whatsapp", to, type: "text", text: { body: msgBody } };
+          const r = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await safeJson(r);
+          if (!r.ok) throw new Error(`Meta WA failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
+          result.whatsapp = { provider: "meta", ok: true };
+        } else if (waMode === "ycloud") {
+          const apiKey = await getSecret("ycloud_api_key");
+          const from = settings.ycloud_from;
+          if (!apiKey || !from) throw new Error("YCloud: missing api_key or from");
+          const r = await fetchWithTimeout(`https://api.ycloud.com/v2/whatsapp/messages`, {
+            method: "POST",
+            headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
+            body: JSON.stringify({ from, to: waNumber, type: "text", text: { body: msgBody } }),
+          });
+          const data = await safeJson(r);
+          if (!r.ok) throw new Error(`YCloud failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
+          result.whatsapp = { provider: "ycloud", ok: true };
+        } else if (waMode === "evolution") {
+          const apiKey = await getSecret("evolution_api_key");
+          const baseUrl = (settings.evolution_url || "").replace(/\/$/, "");
+          const instance = settings.evolution_instance;
+          if (!apiKey || !baseUrl || !instance) throw new Error("Evolution: missing url/instance/api_key");
+          const r = await fetchWithTimeout(`${baseUrl}/message/sendText/${instance}`, {
+            method: "POST",
+            headers: { apikey: apiKey, "Content-Type": "application/json" },
+            body: JSON.stringify({ number: waNumber.replace(/\D/g, ""), text: msgBody }),
+          });
+          const data = await safeJson(r);
+          if (!r.ok) throw new Error(`Evolution failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
+          result.whatsapp = { provider: "evolution", ok: true };
+        } else if (waMode === "twilio") {
+          const sid = await getSecret("twilio_account_sid");
+          const token = await getSecret("twilio_auth_token");
+          const from = await getSecret("twilio_whatsapp_from");
+          if (!sid || !token || !from) throw new Error("Twilio: missing credentials");
+          const auth = btoa(`${sid}:${token}`);
+          const body = new URLSearchParams({ To: `whatsapp:${waNumber}`, From: `whatsapp:${from}`, Body: msgBody });
+          const r = await fetchWithTimeout(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+            method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" }, body,
+          });
+          const data = await safeJson(r);
+          if (!r.ok) throw new Error(`Twilio failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
+          result.whatsapp = { provider: "twilio", ok: true };
+        } else {
+          result.whatsapp = { provider: "link", link: `https://wa.me/${waNumber.replace(/\D/g, "")}?text=${encodeURIComponent(msgBody)}` };
         }
-      } else {
-        result.whatsapp = { link: `https://wa.me/${waNumber.replace(/\D/g, "")}?text=${encodeURIComponent(fullText.slice(0, 1500))}` };
+      } catch (e: any) {
+        console.error("whatsapp send failed", e?.message);
+        result.whatsapp = { provider: waMode, ok: false, error: e.message };
       }
     }
 

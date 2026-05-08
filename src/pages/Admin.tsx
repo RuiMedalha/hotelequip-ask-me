@@ -187,11 +187,35 @@ export default function Admin() {
               <div><Label>Número (com indicativo)</Label><Input value={settings.whatsapp_number || ""} onChange={e => set("whatsapp_number", e.target.value)} placeholder="+351912345678" /></div>
               <div><Label>Modo</Label>
                 <select className="w-full border rounded h-10 px-2 bg-background" value={settings.whatsapp_mode || "link"} onChange={e => set("whatsapp_mode", e.target.value)}>
-                  <option value="link">Link wa.me (notificação)</option>
-                  <option value="twilio">Twilio API (envio automático)</option>
+                  <option value="link">Link wa.me (manual)</option>
+                  <option value="meta">Meta Cloud API (oficial)</option>
+                  <option value="ycloud">YCloud</option>
+                  <option value="evolution">Evolution API (self-hosted)</option>
+                  <option value="twilio">Twilio</option>
                 </select>
               </div>
             </div>
+            {settings.whatsapp_mode === "meta" && (
+              <>
+                <div><Label>Phone Number ID</Label><Input value={settings.meta_wa_phone_number_id || ""} onChange={e => set("meta_wa_phone_number_id", e.target.value)} placeholder="ex: 123456789012345" /></div>
+                <div><Label>Template name (opcional, para fora da janela 24h)</Label><Input value={settings.meta_wa_template || ""} onChange={e => set("meta_wa_template", e.target.value)} placeholder="ex: handoff_notification" /></div>
+                <div><Label>Template language</Label><Input value={settings.meta_wa_template_lang || "pt_PT"} onChange={e => set("meta_wa_template_lang", e.target.value)} /></div>
+                <SecretField keyName="meta_wa_access_token" label="Meta WhatsApp Access Token" />
+              </>
+            )}
+            {settings.whatsapp_mode === "ycloud" && (
+              <>
+                <div><Label>From (número WhatsApp registado na YCloud)</Label><Input value={settings.ycloud_from || ""} onChange={e => set("ycloud_from", e.target.value)} placeholder="+351912345678" /></div>
+                <SecretField keyName="ycloud_api_key" label="YCloud API Key" />
+              </>
+            )}
+            {settings.whatsapp_mode === "evolution" && (
+              <>
+                <div><Label>Base URL</Label><Input value={settings.evolution_url || ""} onChange={e => set("evolution_url", e.target.value)} placeholder="https://evolution.exemplo.com" /></div>
+                <div><Label>Instance name</Label><Input value={settings.evolution_instance || ""} onChange={e => set("evolution_instance", e.target.value)} placeholder="ex: hotelequip" /></div>
+                <SecretField keyName="evolution_api_key" label="Evolution API Key" />
+              </>
+            )}
             {settings.whatsapp_mode === "twilio" && (
               <>
                 <SecretField keyName="twilio_account_sid" label="Twilio Account SID" />
