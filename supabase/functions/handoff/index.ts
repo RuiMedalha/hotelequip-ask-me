@@ -13,6 +13,20 @@ function fetchWithTimeout(url: string, init: RequestInit, ms = 10000) {
   return fetch(url, { ...init, signal: AbortSignal.timeout(ms) });
 }
 
+function normalizePhone(phone?: string | null) {
+  const compact = String(phone || "").replace(/[^+\d]/g, "");
+  if (!compact) return null;
+  if (compact.startsWith("+")) return compact;
+  if (compact.startsWith("00")) return `+${compact.slice(2)}`;
+  if (compact.length === 9 && compact.startsWith("9")) return `+351${compact}`;
+  return `+${compact}`;
+}
+
+function pickFirst(pattern: RegExp, text: string) {
+  const match = text.match(pattern);
+  return match?.[1]?.trim() || match?.[0]?.trim() || null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -41,11 +55,26 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
 
     const transcript = (msgs || []).map((m: any) => `[${m.role}] ${m.content}`).join("\n");
     const lead = (conv as any)?.leads;
-    const leadInfo = lead ? `Nome: ${lead.name || "—"}\nEmail: ${lead.email || "—"}\nTelefone: ${lead.phone || "—"}\nInteresse: ${lead.interest || "—"}` : "Sem lead capturada";
+    const summaryText = String(summary || "");
+    const inferred = {
+      name: lead?.name || pickFirst(/cliente,?\s+([^,\.\n]+?)(?:,|\s+está|\s+deseja|\s+quer)/i, summaryText) || pickFirst(/\bnome:\s*([^\n]+)/i, summaryText),
+      email: lead?.email || pickFirst(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i, `${summaryText}\n${transcript}`),
+      phone: normalizePhone(lead?.phone || pickFirst(/(?:\+|00)?\d[\d\s().-]{7,}\d/, `${summaryText}\n${transcript}`)),
+      interest: lead?.interest || summaryText || reason || null,
+    };
+    if (conv && (!lead?.name || !lead?.email || !lead?.phone || !lead?.interest) && (inferred.name || inferred.email || inferred.phone || inferred.interest)) {
+      const payload = { conversation_id, ...inferred };
+      if (lead?.id) await admin.from("leads").update(payload).eq("id", lead.id);
+      else {
+        const { data: created } = await admin.from("leads").insert(payload).select("id").single();
+        if (created?.id) await admin.from("conversations").update({ lead_id: created.id }).eq("id", conversation_id);
+      }
+    }
+    const leadInfo = `Nome: ${inferred.name || "—"}\nEmail: ${inferred.email || "—"}\nTelefone: ${inferred.phone || "—"}\nInteresse: ${inferred.interest || "—"}`;
     const fullText = `🤖 Nova conversa para humano\n\nMotivo: ${reason}\nResumo: ${summary || "—"}\n\n${leadInfo}\n\n--- Transcrição ---\n${transcript}`;
 
     const result: any = {};
-    const hasPhone = !!(lead?.phone && /^\+?\d{8,}$/.test(String(lead.phone).replace(/\s/g, "")));
+    const hasPhone = !!(inferred.phone && /^\+?\d{8,}$/.test(String(inferred.phone).replace(/\s/g, "")));
 
     // ===== Chatwoot =====
     const cwUrl = (settings.chatwoot_url || "").replace(/\/$/, "");
