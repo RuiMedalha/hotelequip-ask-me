@@ -165,14 +165,13 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
             { type: "body", parameters: [{ type: "text", text: sanitizeWa(msgBody) }] },
           ];
           const cwConvId = result.chatwoot?.conversation_id;
-          if (cwConvId) {
-            components.push({
-              type: "button",
-              sub_type: "url",
-              index: "0",
-              parameters: [{ type: "text", text: String(cwConvId) }],
-            });
-          }
+          // Template tem botão URL dinâmico no índice 0 — sempre obrigatório
+          components.push({
+            type: "button",
+            sub_type: "url",
+            index: "0",
+            parameters: [{ type: "text", text: String(cwConvId || conversation_id).slice(0, 15) }],
+          });
           const payload: any = template
             ? { messaging_product: "whatsapp", to, type: "template", template: { name: template, language: { code: lang }, components } }
             : { messaging_product: "whatsapp", to, type: "text", text: { body: msgBody } };
