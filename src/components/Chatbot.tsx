@@ -5,7 +5,7 @@ import { ChatMessage } from "./ChatMessage";
 import { ChatInput } from "./ChatInput";
 import { TypingIndicator } from "./TypingIndicator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { supabase, FUNCTIONS_URL, isSupabaseConfigured } from "@/integrations/supabase/client";
+import { supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY, isSupabaseConfigured } from "@/integrations/supabase/client";
 
 interface Message { id: string; text: string; isUser: boolean; timestamp: Date; }
 
