@@ -5,22 +5,43 @@ import type { Session } from "@supabase/supabase-js";
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
+  const [roleLoading, setRoleLoading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
-    return () => sub.subscription.unsubscribe();
+    let active = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setSession(data.session);
+      setAuthReady(true);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      setSession(s);
+      setAuthReady(true);
+    });
+
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
-    if (!session) { setIsAdmin(false); setLoading(false); return; }
-    setLoading(true);
-    supabase.from("user_roles").select("role").eq("user_id", session.user.id).then(({ data }) => {
-      setIsAdmin(!!data?.some((r: any) => r.role === "admin"));
-      setLoading(false);
-    });
-  }, [session]);
+    if (!authReady) return;
+    if (!session) { setIsAdmin(false); setRoleLoading(false); return; }
 
-  return { session, isAdmin, loading };
+    let active = true;
+    setRoleLoading(true);
+    supabase.from("user_roles").select("role").eq("user_id", session.user.id).then(({ data }) => {
+      if (!active) return;
+      setIsAdmin(!!data?.some((r: any) => r.role === "admin"));
+      setRoleLoading(false);
+    });
+
+    return () => { active = false; };
+  }, [authReady, session]);
+
+  return { session, isAdmin, loading: !authReady || roleLoading };
 }
