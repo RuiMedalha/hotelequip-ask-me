@@ -180,6 +180,17 @@ export default function Admin() {
               <div><Label>Inbox ID</Label><Input value={settings.chatwoot_inbox_id || ""} onChange={e => set("chatwoot_inbox_id", e.target.value)} /></div>
             </div>
             <SecretField keyName="chatwoot_api_token" label="Chatwoot API Access Token" />
+            <div>
+              <Label>Website Inbox Token (websiteToken do snippet)</Label>
+              <Input
+                value={settings.chatwoot_website_token || ""}
+                onChange={e => set("chatwoot_website_token", e.target.value)}
+                placeholder="ex: eMAT2hYaq7ccaSB3g3pm3nHu"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Usado quando o cliente <strong>não tem telemóvel</strong> — o chat passa para um agente humano dentro do widget, via Chatwoot Website API.
+              </p>
+            </div>
             <Button variant="outline" size="sm" onClick={testChatwoot}>Testar Chatwoot</Button>
             <hr />
             <h3 className="font-semibold">WhatsApp</h3>

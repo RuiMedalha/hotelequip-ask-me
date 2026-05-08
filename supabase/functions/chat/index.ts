@@ -263,7 +263,9 @@ serve(async (req) => {
 
     await admin.from("messages").insert({ conversation_id: convId, role: "assistant", content: finalText });
 
-    return new Response(JSON.stringify({ reply: finalText, conversation_id: convId }), {
+    const { data: convRow } = await admin.from("conversations").select("mode").eq("id", convId).maybeSingle();
+
+    return new Response(JSON.stringify({ reply: finalText, conversation_id: convId, mode: (convRow as any)?.mode || "bot" }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e: any) {
