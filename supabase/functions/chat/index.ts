@@ -140,11 +140,11 @@ async function executeTool(
       .select()
       .single();
     if (lead) await admin.from("conversations").update({ lead_id: lead.id }).eq("id", ctx.conversationId);
+    ctx.sessionLeadSaved.value = true;
     return JSON.stringify({ ok: true, created: true });
   }
   if (name === "request_human_handoff") {
     const admin = adminClient();
-    // Guarda: exigir lead com nome + (email ou telefone) antes de transferir
     const { data: lead } = await admin
       .from("leads")
       .select("name,email,phone")
@@ -153,11 +153,12 @@ async function executeTool(
     const hasName = !!lead?.name;
     const hasEmail = !!lead?.email;
     const hasPhone = !!(lead?.phone && /^\+?\d{8,}$/.test(String(lead.phone).replace(/\s/g, "")));
-    if (!hasName || (!hasEmail && !hasPhone)) {
+    // Exigir que save_lead tenha sido chamado NESTA sessão (confirma que o cliente acabou de dar/confirmar contactos)
+    if (!ctx.sessionLeadSaved.value || !hasName || (!hasEmail && !hasPhone)) {
       return JSON.stringify({
         error: "missing_contact",
-        instruction: "Antes de transferir, pede ao cliente: (1) nome, (2) email OU telefone com indicativo. Se ele der telefone, pergunta também se prefere continuar a conversa por WhatsApp ou aqui no chat. Depois chama save_lead e só então request_human_handoff.",
-        have: { name: hasName, email: hasEmail, phone: hasPhone },
+        instruction: "OBRIGATÓRIO antes de transferir: (1) pergunta o nome se ainda não foi confirmado nesta conversa, (2) pergunta email OU telefone com indicativo (+351 9XX XXX XXX). Se der telefone, pergunta se prefere WhatsApp ou continuar no chat. Depois chama save_lead com os dados confirmados e SÓ DEPOIS chama request_human_handoff. Não assumas dados de conversas antigas.",
+        have: { name: hasName, email: hasEmail, phone: hasPhone, confirmedThisSession: ctx.sessionLeadSaved.value },
       });
     }
     await admin.from("conversations").update({ status: "handoff" }).eq("id", ctx.conversationId);
