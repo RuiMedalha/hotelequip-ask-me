@@ -147,13 +147,7 @@ export const Chatbot = () => {
       setHistory(h => [...h, { role: "assistant", content: reply }]);
       setMessages(p => [...p, { id: Date.now().toString() + "b", text: reply, isUser: false, timestamp: new Date() }]);
 
-      // verificar se entrou em modo humano
-      const convId = data.conversation_id || conversationId;
-      if (convId) {
-        const { data: conv } = await supabase
-          .from("conversations").select("mode").eq("id", convId).maybeSingle();
-        if ((conv as any)?.mode === "human") setHumanMode(true);
-      }
+      if (data.mode === "human") setHumanMode(true);
     } catch (e: any) {
       setMessages(p => [...p, { id: Date.now().toString() + "e", text: `⚠️ ${e.message}`, isUser: false, timestamp: new Date() }]);
     } finally {

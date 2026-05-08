@@ -17,13 +17,20 @@ serve(async (req) => {
     const settings = await getSettings();
     const cwUrl = (settings.chatwoot_url || "").replace(/\/$/, "");
     const websiteToken = settings.chatwoot_website_token;
-    if (!cwUrl || !websiteToken) throw new Error("Chatwoot website token not configured");
 
     const { data: conv } = await admin
       .from("conversations")
-      .select("id, chatwoot_conversation_id, chatwoot_source_id, chatwoot_pubsub_token, chatwoot_last_message_id")
+      .select("id, mode, chatwoot_conversation_id, chatwoot_source_id, chatwoot_pubsub_token, chatwoot_last_message_id")
       .eq("id", conversation_id)
       .maybeSingle();
+
+    if (action === "status") {
+      return new Response(JSON.stringify({ ok: true, mode: (conv as any)?.mode || "bot" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!cwUrl || !websiteToken) throw new Error("Chatwoot website token not configured");
     if (!conv?.chatwoot_conversation_id || !conv?.chatwoot_source_id) {
       throw new Error("Conversa ainda não tem ligação Chatwoot (handoff não executado)");
     }
