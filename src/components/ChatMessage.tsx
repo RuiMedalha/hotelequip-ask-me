@@ -23,8 +23,13 @@ export const ChatMessage = ({ message, isUser, timestamp }: ChatMessageProps) =>
             : "bg-chat-bubble-bot text-foreground mr-12 border border-border"
         )}
       >
-        <div className="text-sm leading-relaxed prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1">
-          <ReactMarkdown>{message}</ReactMarkdown>
+        <div className="text-sm leading-relaxed prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-ul:my-1 prose-headings:my-2 prose-img:my-2 prose-img:rounded-lg prose-img:max-h-40 prose-a:text-primary">
+          <ReactMarkdown
+            components={{
+              a: ({ node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+              img: ({ node, ...props }) => <img {...props} loading="lazy" alt={props.alt || ""} />,
+            }}
+          >{message}</ReactMarkdown>
         </div>
         <span
           className={cn(
