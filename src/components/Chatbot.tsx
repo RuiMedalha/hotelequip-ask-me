@@ -18,10 +18,16 @@ function getVisitorId() {
 export const Chatbot = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [history, setHistory] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(
+    () => localStorage.getItem("he_conversation_id")
+  );
   const [isTyping, setIsTyping] = useState(false);
   const [welcome, setWelcome] = useState("Olá! 👋 Sou o assistente da HotelEquip. Como posso ajudar?");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (conversationId) localStorage.setItem("he_conversation_id", conversationId);
+  }, [conversationId]);
 
   useEffect(() => {
     if (isSupabaseConfigured) {
@@ -30,8 +36,32 @@ export const Chatbot = () => {
     }
   }, []);
 
+  // Restaurar conversa anterior se existir, senão mostrar welcome
   useEffect(() => {
-    setMessages([{ id: "welcome", text: welcome, isUser: false, timestamp: new Date() }]);
+    let cancelled = false;
+    (async () => {
+      if (isSupabaseConfigured && conversationId) {
+        const { data } = await supabase
+          .from("messages")
+          .select("id,role,content,created_at")
+          .eq("conversation_id", conversationId)
+          .order("created_at");
+        if (cancelled) return;
+        if (data && data.length > 0) {
+          setMessages(data.map((m: any) => ({
+            id: m.id,
+            text: m.content,
+            isUser: m.role === "user",
+            timestamp: new Date(m.created_at),
+          })));
+          setHistory(data.map((m: any) => ({ role: m.role, content: m.content })));
+          return;
+        }
+      }
+      setMessages([{ id: "welcome", text: welcome, isUser: false, timestamp: new Date() }]);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [welcome]);
 
   useEffect(() => {
