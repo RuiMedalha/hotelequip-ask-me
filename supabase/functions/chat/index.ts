@@ -87,7 +87,11 @@ async function executeTool(
     const data = await r.json();
     return JSON.stringify(
       (data || []).map((p: any) => ({
-        id: p.id, name: p.name, price: p.price, permalink: p.permalink,
+        id: p.id,
+        name: p.name,
+        price: p.price,
+        permalink: p.permalink,
+        image: p.images?.[0]?.src || null,
         short_description: (p.short_description || "").replace(/<[^>]+>/g, "").slice(0, 200),
         in_stock: p.stock_status === "instock",
       }))
