@@ -88,8 +88,8 @@ export default function AdminConversations() {
                   <div>{leadByConv[c.id]?.name || `${c.visitor_id.slice(0, 12)}…`}</div>
                   <div className="text-xs text-muted-foreground">{c.status} · {new Date(c.created_at).toLocaleString("pt-PT")}</div>
                 </button>
-                {waNumber && (
-                  <div className="px-2 pb-2">
+                <div className="px-2 pb-2 flex flex-wrap gap-2">
+                  {waNumber && (
                     <a
                       href={buildWaLink(c.id)}
                       target="_blank"
@@ -98,8 +98,14 @@ export default function AdminConversations() {
                     >
                       Notificar via WhatsApp
                     </a>
-                  </div>
-                )}
+                  )}
+                  <button
+                    onClick={() => triggerHandoff(c.id)}
+                    className="inline-flex text-xs px-2 py-1 rounded bg-primary text-primary-foreground hover:opacity-90"
+                  >
+                    Testar handoff
+                  </button>
+                </div>
               </div>
             ))}
           </div>
