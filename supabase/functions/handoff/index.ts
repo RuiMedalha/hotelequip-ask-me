@@ -103,7 +103,7 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
           const lang = settings.meta_wa_template_lang || "pt_PT";
           if (!token || !phoneId) throw new Error("Meta: missing access_token or phone_number_id");
           const to = waNumber.replace(/\D/g, "");
-          const sanitizeWa = (s: string) => s.replace(/[\n\r\t]+/g, " ").replace(/ {4,}/g, "   ").trim().slice(0, 1000);
+          const sanitizeWa = (s: string) => s.replace(/[\n\r\t]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 700);
           const components: any[] = [
             { type: "body", parameters: [{ type: "text", text: sanitizeWa(msgBody) }] },
           ];
