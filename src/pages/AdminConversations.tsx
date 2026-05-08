@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Navigate, Link } from "react-router-dom";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/hooks/use-toast";
 
 export default function AdminConversations() {
   const { session, isAdmin, loading } = useAuth();
@@ -50,6 +51,30 @@ export default function AdminConversations() {
     return `https://wa.me/${num}?text=${encodeURIComponent(lines)}`;
   };
 
+  const triggerHandoff = async (convId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const r = await fetch(`${FUNCTIONS_URL}/handoff`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+          conversation_id: convId,
+          reason: "teste manual do admin",
+          summary: "Disparado a partir de /admin/conversations para validar o template WhatsApp e o URL dinâmico do botão.",
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      toast({ title: "Handoff disparado", description: "Verifica o WhatsApp e os logs da função handoff." });
+    } catch (e: any) {
+      toast({ title: "Erro no handoff", description: e.message, variant: "destructive" });
+    }
+  };
+
   if (loading) return <div className="p-8">A carregar…</div>;
   if (!session) return <Navigate to="/admin/login" replace />;
   if (!isAdmin) return <div className="p-8">Sem permissões.</div>;
@@ -87,8 +112,8 @@ export default function AdminConversations() {
                   <div>{leadByConv[c.id]?.name || `${c.visitor_id.slice(0, 12)}…`}</div>
                   <div className="text-xs text-muted-foreground">{c.status} · {new Date(c.created_at).toLocaleString("pt-PT")}</div>
                 </button>
-                {waNumber && (
-                  <div className="px-2 pb-2">
+                <div className="px-2 pb-2 flex flex-wrap gap-2">
+                  {waNumber && (
                     <a
                       href={buildWaLink(c.id)}
                       target="_blank"
@@ -97,8 +122,14 @@ export default function AdminConversations() {
                     >
                       Notificar via WhatsApp
                     </a>
-                  </div>
-                )}
+                  )}
+                  <button
+                    onClick={() => triggerHandoff(c.id)}
+                    className="inline-flex text-xs px-2 py-1 rounded bg-primary text-primary-foreground hover:opacity-90"
+                  >
+                    Testar handoff
+                  </button>
+                </div>
               </div>
             ))}
           </div>
