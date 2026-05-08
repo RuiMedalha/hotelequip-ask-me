@@ -27,6 +27,34 @@ function pickFirst(pattern: RegExp, text: string) {
   return match?.[1]?.trim() || match?.[0]?.trim() || null;
 }
 
+function getChatwootContactId(contact: any) {
+  return contact?.payload?.contact?.id || contact?.payload?.id || contact?.id || null;
+}
+
+function getChatwootContactInboxes(contact: any): any[] {
+  return contact?.payload?.contact?.contact_inboxes || contact?.payload?.contact_inboxes || contact?.contact_inboxes || [];
+}
+
+async function findExistingChatwootContact(base: string, accountId: any, token: string, queries: (string | null | undefined)[], phone?: string | null, email?: string | null) {
+  const normalizedPhone = normalizePhone(phone);
+  const normalizedEmail = String(email || "").toLowerCase();
+  for (const query of queries.filter(Boolean)) {
+    const searchRes = await fetchWithTimeout(`${base}/api/v1/accounts/${accountId}/contacts/search?q=${encodeURIComponent(String(query))}&page=1`, {
+      headers: { api_access_token: token },
+    });
+    const data = await safeJson(searchRes);
+    if (!searchRes.ok) continue;
+    const contacts = Array.isArray(data?.payload) ? data.payload : [];
+    const exact = contacts.find((c: any) => {
+      const contactPhone = normalizePhone(c.phone_number);
+      const contactEmail = String(c.email || "").toLowerCase();
+      return (normalizedPhone && contactPhone === normalizedPhone) || (normalizedEmail && contactEmail === normalizedEmail);
+    });
+    if (exact || contacts[0]) return exact || contacts[0];
+  }
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
