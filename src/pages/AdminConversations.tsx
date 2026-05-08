@@ -51,6 +51,30 @@ export default function AdminConversations() {
     return `https://wa.me/${num}?text=${encodeURIComponent(lines)}`;
   };
 
+  const triggerHandoff = async (convId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const r = await fetch(`${FUNCTIONS_URL}/handoff`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({
+          conversation_id: convId,
+          reason: "teste manual do admin",
+          summary: "Disparado a partir de /admin/conversations para validar o template WhatsApp e o URL dinâmico do botão.",
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+      toast({ title: "Handoff disparado", description: "Verifica o WhatsApp e os logs da função handoff." });
+    } catch (e: any) {
+      toast({ title: "Erro no handoff", description: e.message, variant: "destructive" });
+    }
+  };
+
   if (loading) return <div className="p-8">A carregar…</div>;
   if (!session) return <Navigate to="/admin/login" replace />;
   if (!isAdmin) return <div className="p-8">Sem permissões.</div>;
