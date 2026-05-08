@@ -59,7 +59,9 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
           body: JSON.stringify({
             inbox_id: Number(cwInbox),
             name: lead?.name || `Visitante ${conv?.visitor_id?.slice(0, 8)}`,
-            email: lead?.email, phone_number: lead?.phone,
+            email: lead?.email || undefined,
+            phone_number: lead?.phone || `+000${Date.now().toString().slice(-10)}`,
+            identifier: conv?.visitor_id,
           }),
         });
         const contact = await safeJson(contactRes);
