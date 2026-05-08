@@ -180,6 +180,7 @@ export default function Admin() {
               <div><Label>Inbox ID</Label><Input value={settings.chatwoot_inbox_id || ""} onChange={e => set("chatwoot_inbox_id", e.target.value)} /></div>
             </div>
             <SecretField keyName="chatwoot_api_token" label="Chatwoot API Access Token" />
+            <Button variant="outline" size="sm" onClick={testChatwoot}>Testar Chatwoot</Button>
             <hr />
             <h3 className="font-semibold">WhatsApp</h3>
             <div className="grid grid-cols-2 gap-4">
