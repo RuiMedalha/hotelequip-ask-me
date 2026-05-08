@@ -16,9 +16,7 @@ export default function AdminLogin() {
   const nav = useNavigate();
   const { session, isAdmin, loading } = useAuth();
 
-  useEffect(() => {
-    if (!loading && session && isAdmin) nav("/admin", { replace: true });
-  }, [session, isAdmin, loading, nav]);
+  // Redirect removido — fazia o input desmontar. Mostramos UI alternativa abaixo.
 
   if (!isSupabaseConfigured) {
     return (
