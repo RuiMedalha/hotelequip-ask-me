@@ -116,16 +116,31 @@ async function executeTool(
   }
   if (name === "save_lead") {
     const admin = adminClient();
+    // Procurar lead existente para esta conversa (evita duplicados)
+    const { data: existing } = await admin
+      .from("leads")
+      .select("id,name,email,phone,interest")
+      .eq("conversation_id", ctx.conversationId)
+      .maybeSingle();
+
+    const merged = {
+      name: args.name ?? existing?.name ?? null,
+      email: args.email ?? existing?.email ?? null,
+      phone: args.phone ?? existing?.phone ?? null,
+      interest: args.interest ?? existing?.interest ?? null,
+    };
+
+    if (existing) {
+      await admin.from("leads").update(merged).eq("id", existing.id);
+      return JSON.stringify({ ok: true, updated: true });
+    }
     const { data: lead } = await admin
       .from("leads")
-      .insert({
-        conversation_id: ctx.conversationId,
-        name: args.name, email: args.email, phone: args.phone, interest: args.interest,
-      })
+      .insert({ conversation_id: ctx.conversationId, ...merged })
       .select()
       .single();
     if (lead) await admin.from("conversations").update({ lead_id: lead.id }).eq("id", ctx.conversationId);
-    return JSON.stringify({ ok: true });
+    return JSON.stringify({ ok: true, created: true });
   }
   if (name === "request_human_handoff") {
     const admin = adminClient();
