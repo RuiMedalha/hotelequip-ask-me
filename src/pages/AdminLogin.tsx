@@ -39,6 +39,21 @@ export default function AdminLogin() {
     if (error) setErr(error.message);
   };
 
+  if (session) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-secondary">
+        <Card className="p-6 max-w-md w-full space-y-3">
+          <h1 className="text-xl font-bold">Já tens sessão</h1>
+          <p className="text-sm text-muted-foreground">{session.user.email} — {isAdmin ? "admin" : "sem role admin"}</p>
+          <div className="flex gap-2">
+            {isAdmin && <Button onClick={() => nav("/admin")}>Ir para Admin</Button>}
+            <Button variant="outline" onClick={async () => { await supabase.auth.signOut(); }}>Logout</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-secondary">
       <Card className="p-6 max-w-md w-full">
