@@ -37,6 +37,8 @@ serve(async (req) => {
         inbox_id: Number(inbox_id),
         name: `Teste HotelEquip Bot ${ts}`,
         email: `teste-${ts}@hotelequip.test`,
+        phone_number: `+351900${String(ts).slice(-6)}`,
+        identifier: `bot-test-${ts}`,
       }),
     });
     const contact = await contactRes.json();
