@@ -16,9 +16,7 @@ export default function AdminLogin() {
   const nav = useNavigate();
   const { session, isAdmin, loading } = useAuth();
 
-  useEffect(() => {
-    if (!loading && session && isAdmin) nav("/admin", { replace: true });
-  }, [session, isAdmin, loading, nav]);
+  // Redirect removido — fazia o input desmontar. Mostramos UI alternativa abaixo.
 
   if (!isSupabaseConfigured) {
     return (
@@ -40,6 +38,21 @@ export default function AdminLogin() {
     setBusy(false);
     if (error) setErr(error.message);
   };
+
+  if (session) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-secondary">
+        <Card className="p-6 max-w-md w-full space-y-3">
+          <h1 className="text-xl font-bold">Já tens sessão</h1>
+          <p className="text-sm text-muted-foreground">{session.user.email} — {isAdmin ? "admin" : "sem role admin"}</p>
+          <div className="flex gap-2">
+            {isAdmin && <Button onClick={() => nav("/admin")}>Ir para Admin</Button>}
+            <Button variant="outline" onClick={async () => { await supabase.auth.signOut(); }}>Logout</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-secondary">
