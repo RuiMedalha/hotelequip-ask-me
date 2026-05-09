@@ -12,6 +12,9 @@ import { useToast } from "@/hooks/use-toast";
 
 type Settings = Record<string, any>;
 
+const ANTHROPIC_MODELS = ["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"];
+const OPENAI_MODELS = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"];
+
 async function callFn(path: string, body: any) {
   const { data: { session } } = await supabase.auth.getSession();
   const r = await fetch(`${FUNCTIONS_URL}/${path}`, {
