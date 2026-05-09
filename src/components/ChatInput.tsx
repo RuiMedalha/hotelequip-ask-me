@@ -1,15 +1,28 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Send } from "lucide-react";
+import { Send, Mic, MicOff } from "lucide-react";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
   disabled?: boolean;
 }
 
+function getSpeechRecognition(): any {
+  if (typeof window === "undefined") return null;
+  return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
+}
+
 export const ChatInput = ({ onSendMessage, disabled }: ChatInputProps) => {
   const [message, setMessage] = useState("");
+  const [listening, setListening] = useState(false);
+  const [supported, setSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SR = getSpeechRecognition();
+    setSupported(!!SR);
+  }, []);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,6 +32,45 @@ export const ChatInput = ({ onSendMessage, disabled }: ChatInputProps) => {
     }
   };
 
+  const startListening = () => {
+    const SR = getSpeechRecognition();
+    if (!SR) return;
+    try {
+      const rec = new SR();
+      rec.lang = "pt-PT";
+      rec.interimResults = true;
+      rec.continuous = false;
+      rec.maxAlternatives = 1;
+      let finalText = "";
+      rec.onresult = (event: any) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) finalText += t;
+          else interim += t;
+        }
+        setMessage((prev) => (finalText || interim ? (finalText || interim) : prev));
+      };
+      rec.onerror = () => setListening(false);
+      rec.onend = () => {
+        setListening(false);
+        recognitionRef.current = null;
+      };
+      recognitionRef.current = rec;
+      rec.start();
+      setListening(true);
+    } catch {
+      setListening(false);
+    }
+  };
+
+  const stopListening = () => {
+    try { recognitionRef.current?.stop(); } catch { /* noop */ }
+    setListening(false);
+  };
+
+  const toggleMic = () => (listening ? stopListening() : startListening());
+
   return (
     <form
       onSubmit={handleSubmit}
@@ -27,10 +79,23 @@ export const ChatInput = ({ onSendMessage, disabled }: ChatInputProps) => {
       <Input
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        placeholder="Digite sua mensagem..."
+        placeholder={listening ? "🎤 A ouvir..." : "Digite sua mensagem..."}
         disabled={disabled}
         className="flex-1 rounded-full bg-chat-input border-border focus:ring-chat-primary focus:border-chat-primary"
       />
+      {supported && (
+        <Button
+          type="button"
+          size="icon"
+          variant={listening ? "destructive" : "outline"}
+          onClick={toggleMic}
+          disabled={disabled}
+          aria-label={listening ? "A ouvir..." : "Ditar mensagem por voz"}
+          className={`rounded-full ${listening ? "animate-pulse" : ""}`}
+        >
+          {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+        </Button>
+      )}
       <Button
         type="submit"
         size="icon"
