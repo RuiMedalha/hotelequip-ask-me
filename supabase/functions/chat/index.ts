@@ -58,14 +58,15 @@ const TOOLS = [
     type: "function",
     function: {
       name: "request_human_handoff",
-      description: "Passa a conversa para um agente humano (notifica WhatsApp e cria ticket no Chatwoot).",
+      description: "Passa a conversa para um agente humano. Pergunta SEMPRE primeiro se o cliente prefere continuar no chat ou ser contactado por WhatsApp, e passa essa escolha em 'channel'. Se 'whatsapp', o telefone do cliente é OBRIGATÓRIO.",
       parameters: {
         type: "object",
         properties: {
           reason: { type: "string" },
           summary: { type: "string", description: "Resumo curto da conversa" },
+          channel: { type: "string", enum: ["chat", "whatsapp"], description: "Canal escolhido pelo cliente para falar com a equipa." },
         },
-        required: ["reason"],
+        required: ["reason", "channel"],
       },
     },
   },
@@ -155,23 +156,30 @@ async function executeTool(
     const hasName = !!lead?.name;
     const hasEmail = !!lead?.email;
     const hasPhone = !!(lead?.phone && /^\+?\d{8,}$/.test(String(lead.phone).replace(/\s/g, "")));
-    // Exigir que save_lead tenha sido chamado NESTA sessão (confirma que o cliente acabou de dar/confirmar contactos)
+    const channel = args.channel === "whatsapp" ? "whatsapp" : "chat";
+    // WhatsApp exige telefone válido. Sem ele, força fallback para chat e pede telefone.
+    if (channel === "whatsapp" && !hasPhone) {
+      return JSON.stringify({
+        error: "missing_phone_for_whatsapp",
+        instruction: "Para WhatsApp precisamos do número de telefone do cliente com indicativo (+351 9XX XXX XXX). Pede o telefone, chama save_lead com ele, e só depois chama request_human_handoff novamente com channel='whatsapp'. Se o cliente não quiser dar telefone, sugere channel='chat'.",
+      });
+    }
     if (!ctx.sessionLeadSaved.value || !hasName || (!hasEmail && !hasPhone)) {
       return JSON.stringify({
         error: "missing_contact",
-        instruction: "OBRIGATÓRIO antes de transferir: (1) pergunta o nome se ainda não foi confirmado nesta conversa, (2) pergunta email OU telefone com indicativo (+351 9XX XXX XXX). Se der telefone, pergunta se prefere WhatsApp ou continuar no chat. Depois chama save_lead com os dados confirmados e SÓ DEPOIS chama request_human_handoff. Não assumas dados de conversas antigas.",
+        instruction: "OBRIGATÓRIO antes de transferir: (1) confirma o nome, (2) pergunta email OU telefone com indicativo. (3) Pergunta se prefere continuar no chat ou no WhatsApp e passa essa escolha em 'channel'. Chama save_lead com os dados confirmados e SÓ DEPOIS chama request_human_handoff.",
         have: { name: hasName, email: hasEmail, phone: hasPhone, confirmedThisSession: ctx.sessionLeadSaved.value },
       });
     }
-    await admin.from("conversations").update({ status: "handoff" }).eq("id", ctx.conversationId);
+    await admin.from("conversations").update({ status: "handoff", channel }).eq("id", ctx.conversationId);
     try {
       await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/handoff`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
-        body: JSON.stringify({ conversation_id: ctx.conversationId, reason: args.reason, summary: args.summary }),
+        body: JSON.stringify({ conversation_id: ctx.conversationId, reason: args.reason, summary: args.summary, channel }),
       });
     } catch (e) { console.error("handoff trigger fail", e); }
-    return JSON.stringify({ ok: true, message: ctx.settings.handoff_message });
+    return JSON.stringify({ ok: true, channel, message: ctx.settings.handoff_message });
   }
   return JSON.stringify({ error: "unknown tool" });
 }
@@ -256,10 +264,11 @@ serve(async (req) => {
 
 POLÍTICA DE TRANSFERÊNCIA PARA HUMANO (obrigatória):
 - Quando o cliente pedir para falar com humano (ou for óbvio que precisa), NÃO chames request_human_handoff de imediato.
-- Primeiro, pergunta de forma simpática: o nome (se ainda não tiveres) e email OU telefone com indicativo (ex: +351 9XX XXX XXX) para o colega o poder contactar.
-- Se ele der telefone, pergunta também: "Prefere continuar a conversa por WhatsApp ou aqui no chat?".
-- Assim que tiveres nome + (email ou telefone), chama save_lead com esses dados, e só depois chama request_human_handoff com um resumo curto.
-- Nunca inventes contactos. Se o cliente recusar dar contacto, podes transferir mesmo assim mas explica que o agente só poderá responder enquanto ele mantiver o chat aberto.`;
+- Primeiro confirma o nome (se ainda não tiveres) e pede email OU telefone com indicativo (ex: +351 9XX XXX XXX).
+- Pergunta SEMPRE: "Prefere continuar a conversa aqui no chat ou ser contactado por WhatsApp?". A resposta determina o parâmetro 'channel' ('chat' ou 'whatsapp').
+- Se escolher WhatsApp, o telefone com indicativo é OBRIGATÓRIO. Sem telefone, pede-o explicitamente; se recusar, sugere channel='chat'.
+- Assim que tiveres nome + (email ou telefone) + channel, chama save_lead e só depois request_human_handoff com reason, summary curto e channel.
+- Nunca inventes contactos.`;
 
     const conversation: ChatMessage[] = [
       { role: "system", content: systemPrompt + HANDOFF_POLICY },

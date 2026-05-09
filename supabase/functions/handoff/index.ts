@@ -58,12 +58,12 @@ async function findExistingChatwootContact(base: string, accountId: any, token: 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const { conversation_id, reason, summary } = await req.json();
+    const { conversation_id, reason, summary, channel } = await req.json();
     if (!conversation_id) {
       return new Response(JSON.stringify({ error: "conversation_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const job = processHandoff(conversation_id, reason, summary);
+    const job = processHandoff(conversation_id, reason, summary, channel);
     if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(job);
     else job.catch((e) => console.error("handoff background fail", e));
 
@@ -73,7 +73,7 @@ serve(async (req) => {
   }
 });
 
-async function processHandoff(conversation_id: string, reason?: string, summary?: string) {
+async function processHandoff(conversation_id: string, reason?: string, summary?: string, channelArg?: string) {
   try {
     const admin = adminClient();
     const settings = await getSettings();
@@ -233,41 +233,63 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
       result.chatwoot = { ok: false, error: "Chatwoot not configured: missing chatwoot_url/chatwoot_website_token or admin API settings" };
     }
 
-    // WhatsApp
-    const waNumber = settings.whatsapp_number;
+    // ===== WhatsApp =====
+    // Determinar canal escolhido pelo cliente (com fallback à coluna conversations.channel)
+    let channel = (channelArg as string) || (conv as any)?.channel || "chat";
+    // Se o cliente escolheu WhatsApp mas não temos telefone válido, cair para chat (o bot deve voltar a perguntar)
+    if (channel === "whatsapp" && !hasPhone) {
+      channel = "chat";
+      result.whatsapp_client = { ok: false, error: "missing_phone, fell back to chat" };
+      await admin.from("conversations").update({ channel: "chat" }).eq("id", conversation_id);
+    }
+
+    const teamWaNumber = settings.whatsapp_number;            // número INTERNO da equipa (notificação)
     const waMode = settings.whatsapp_mode || "link";
     const msgBody = fullText.slice(0, 1500);
-    if (waNumber) {
+
+    // Helper: envio Meta template/text para um destinatário específico
+    async function sendMeta(to: string, opts: { isClient: boolean }) {
+      const token = await getSecret("meta_wa_access_token") || await getSecret("meta_wa_token");
+      const phoneId = settings.meta_wa_phone_number_id;
+      const template = settings.meta_wa_template;
+      const lang = settings.meta_wa_template_lang || "pt_PT";
+      if (!token || !phoneId) throw new Error("Meta: missing access_token or phone_number_id");
+      const sanitizeWa = (s: string) => s.replace(/[\n\r\t]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 700);
+      const bodyText = opts.isClient
+        ? sanitizeWa(`Olá ${inferred.name || ""}, é a equipa HotelEquip. Recebemos o seu pedido: ${inferred.interest || reason || "—"}. Estamos a preparar resposta.`)
+        : sanitizeWa(msgBody);
+      const components: any[] = [{ type: "body", parameters: [{ type: "text", text: bodyText }] }];
+      const cwConvId = result.chatwoot?.conversation_id;
+      components.push({ type: "button", sub_type: "url", index: "0", parameters: [{ type: "text", text: String(cwConvId || conversation_id).slice(0, 15) }] });
+      const payload: any = template
+        ? { messaging_product: "whatsapp", to: to.replace(/\D/g, ""), type: "template", template: { name: template, language: { code: lang }, components } }
+        : { messaging_product: "whatsapp", to: to.replace(/\D/g, ""), type: "text", text: { body: bodyText } };
+      const r = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJson(r);
+      if (!r.ok) throw new Error(`Meta WA failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
+      return data;
+    }
+
+    // 1) Se canal=whatsapp e há telefone do cliente válido -> envia template ao CLIENTE
+    if (channel === "whatsapp" && hasPhone) {
+      try {
+        await sendMeta(inferred.phone!, { isClient: true });
+        result.whatsapp_client = { provider: "meta", ok: true, to: inferred.phone };
+      } catch (e: any) {
+        console.error("meta wa to client failed", e?.message);
+        result.whatsapp_client = { provider: "meta", ok: false, error: e.message };
+      }
+    }
+
+    // 2) Notificação interna à equipa (mantém comportamento existente)
+    if (teamWaNumber) {
       try {
         if (waMode === "meta") {
-          const token = await getSecret("meta_wa_access_token");
-          const phoneId = settings.meta_wa_phone_number_id;
-          const template = settings.meta_wa_template;
-          const lang = settings.meta_wa_template_lang || "pt_PT";
-          if (!token || !phoneId) throw new Error("Meta: missing access_token or phone_number_id");
-          const to = waNumber.replace(/\D/g, "");
-          const sanitizeWa = (s: string) => s.replace(/[\n\r\t]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 700);
-          const components: any[] = [
-            { type: "body", parameters: [{ type: "text", text: sanitizeWa(msgBody) }] },
-          ];
-          const cwConvId = result.chatwoot?.conversation_id;
-          // Template tem botão URL dinâmico no índice 0 — sempre obrigatório
-          components.push({
-            type: "button",
-            sub_type: "url",
-            index: "0",
-            parameters: [{ type: "text", text: String(cwConvId || conversation_id).slice(0, 15) }],
-          });
-          const payload: any = template
-            ? { messaging_product: "whatsapp", to, type: "template", template: { name: template, language: { code: lang }, components } }
-            : { messaging_product: "whatsapp", to, type: "text", text: { body: msgBody } };
-          const r = await fetchWithTimeout(`https://graph.facebook.com/v21.0/${phoneId}/messages`, {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-          const data = await safeJson(r);
-          if (!r.ok) throw new Error(`Meta WA failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
+          await sendMeta(teamWaNumber, { isClient: false });
           result.whatsapp = { provider: "meta", ok: true };
         } else if (waMode === "ycloud") {
           const apiKey = await getSecret("ycloud_api_key");
@@ -276,7 +298,7 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
           const r = await fetchWithTimeout(`https://api.ycloud.com/v2/whatsapp/messages`, {
             method: "POST",
             headers: { "X-API-Key": apiKey, "Content-Type": "application/json" },
-            body: JSON.stringify({ from, to: waNumber, type: "text", text: { body: msgBody } }),
+            body: JSON.stringify({ from, to: teamWaNumber, type: "text", text: { body: msgBody } }),
           });
           const data = await safeJson(r);
           if (!r.ok) throw new Error(`YCloud failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
@@ -289,7 +311,7 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
           const r = await fetchWithTimeout(`${baseUrl}/message/sendText/${instance}`, {
             method: "POST",
             headers: { apikey: apiKey, "Content-Type": "application/json" },
-            body: JSON.stringify({ number: waNumber.replace(/\D/g, ""), text: msgBody }),
+            body: JSON.stringify({ number: teamWaNumber.replace(/\D/g, ""), text: msgBody }),
           });
           const data = await safeJson(r);
           if (!r.ok) throw new Error(`Evolution failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
@@ -300,7 +322,7 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
           const from = await getSecret("twilio_whatsapp_from");
           if (!sid || !token || !from) throw new Error("Twilio: missing credentials");
           const auth = btoa(`${sid}:${token}`);
-          const body = new URLSearchParams({ To: `whatsapp:${waNumber}`, From: `whatsapp:${from}`, Body: msgBody });
+          const body = new URLSearchParams({ To: `whatsapp:${teamWaNumber}`, From: `whatsapp:${from}`, Body: msgBody });
           const r = await fetchWithTimeout(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
             method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/x-www-form-urlencoded" }, body,
           });
@@ -308,7 +330,7 @@ async function processHandoff(conversation_id: string, reason?: string, summary?
           if (!r.ok) throw new Error(`Twilio failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
           result.whatsapp = { provider: "twilio", ok: true };
         } else {
-          result.whatsapp = { provider: "link", link: `https://wa.me/${waNumber.replace(/\D/g, "")}?text=${encodeURIComponent(msgBody)}` };
+          result.whatsapp = { provider: "link", link: `https://wa.me/${teamWaNumber.replace(/\D/g, "")}?text=${encodeURIComponent(msgBody)}` };
         }
       } catch (e: any) {
         console.error("whatsapp send failed", e?.message);
