@@ -92,6 +92,23 @@ export default function Admin() {
     });
   };
 
+  const runIngest = async (fn: string, label: string) => {
+    setBusy(true);
+    try {
+      const r = await callFn(fn, {});
+      if (r?.ok || r?.success) {
+        toast({ title: `${label} sincronizado`, description: r.count != null ? `${r.count} entradas` : undefined });
+        await load();
+      } else {
+        toast({ title: `${label} falhou`, description: String(r?.error || JSON.stringify(r)).slice(0, 250) });
+      }
+    } catch (e: any) {
+      toast({ title: `${label} falhou`, description: e?.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const SecretField = ({ keyName, label, placeholder }: { keyName: string; label: string; placeholder?: string }) => {
     const [v, setV] = useState("");
     const existing = secrets.find(s => s.key === keyName);
