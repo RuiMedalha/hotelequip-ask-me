@@ -194,9 +194,7 @@ export default function Admin() {
                   <option value="anthropic">Anthropic</option>
                 </select>
               </div>
-              {(settings.ai_provider || "openai") !== "anthropic" && (
-                <div><Label>Base URL</Label><Input value={settings.ai_base_url || ""} onChange={e => set("ai_base_url", e.target.value)} placeholder="https://api.openai.com/v1" /></div>
-              )}
+              <div><Label>Base URL</Label><Input value={settings.ai_base_url || ""} onChange={e => set("ai_base_url", e.target.value)} placeholder={(settings.ai_provider || "openai") === "anthropic" ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"} /></div>
               <div>
                 <Label>Modelo</Label>
                 {(() => {
