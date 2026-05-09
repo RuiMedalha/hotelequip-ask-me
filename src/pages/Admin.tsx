@@ -41,7 +41,7 @@ export default function Admin() {
     setSecrets(Array.isArray(list) ? list : []);
   };
 
-  useEffect(() => { if (isAdmin) load(); }, [isAdmin]);
+  useEffect(() => { if (isAdmin) { load(); loadKbStats(); } }, [isAdmin]);
 
   if (loading) return <div className="p-8">A carregar…</div>;
   if (!session) return <Navigate to="/admin/login" replace />;
