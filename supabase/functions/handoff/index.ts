@@ -73,7 +73,7 @@ serve(async (req) => {
   }
 });
 
-async function processHandoff(conversation_id: string, reason?: string, summary?: string) {
+async function processHandoff(conversation_id: string, reason?: string, summary?: string, channelArg?: string) {
   try {
     const admin = adminClient();
     const settings = await getSettings();
