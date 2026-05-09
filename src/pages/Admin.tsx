@@ -92,18 +92,47 @@ export default function Admin() {
     });
   };
 
-  const runIngest = async (fn: string, label: string) => {
+  const [kbStats, setKbStats] = useState<{ total: number; by_type: Record<string, number> } | null>(null);
+  const [kbUrl, setKbUrl] = useState("");
+
+  const loadKbStats = async () => {
+    try {
+      const r = await callFn("ingest-knowledge", { action: "stats" });
+      if (r && typeof r.total === "number") setKbStats({ total: r.total, by_type: r.by_type || {} });
+    } catch {}
+  };
+
+  const ingestWoo = async () => {
     setBusy(true);
     try {
-      const r = await callFn(fn, {});
-      if (r?.ok || r?.success) {
-        toast({ title: `${label} sincronizado`, description: r.count != null ? `${r.count} entradas` : undefined });
-        await load();
+      const r = await callFn("ingest-knowledge", { action: "ingest_woo" });
+      if (r?.ok) {
+        toast({ title: "Produtos carregados", description: `${r.ingested ?? 0} produtos` });
+        await loadKbStats();
       } else {
-        toast({ title: `${label} falhou`, description: String(r?.error || JSON.stringify(r)).slice(0, 250) });
+        toast({ title: "Falhou", description: String(r?.error || JSON.stringify(r)).slice(0, 250) });
       }
     } catch (e: any) {
-      toast({ title: `${label} falhou`, description: e?.message });
+      toast({ title: "Falhou", description: e?.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ingestUrl = async () => {
+    if (!kbUrl) return;
+    setBusy(true);
+    try {
+      const r = await callFn("ingest-knowledge", { action: "ingest_url", url: kbUrl, source_type: "page" });
+      if (r?.ok) {
+        toast({ title: "Página carregada", description: `${r.ingested ?? 0} chunks${r.title ? ` — ${r.title}` : ""}` });
+        setKbUrl("");
+        await loadKbStats();
+      } else {
+        toast({ title: "Falhou", description: String(r?.error || JSON.stringify(r)).slice(0, 250) });
+      }
+    } catch (e: any) {
+      toast({ title: "Falhou", description: e?.message });
     } finally {
       setBusy(false);
     }
