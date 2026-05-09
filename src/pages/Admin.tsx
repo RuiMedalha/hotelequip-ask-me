@@ -117,6 +117,7 @@ export default function Admin() {
         <TabsList>
           <TabsTrigger value="ai">AI Provider</TabsTrigger>
           <TabsTrigger value="prompts">Prompts</TabsTrigger>
+          <TabsTrigger value="kb">Knowledge Base</TabsTrigger>
           <TabsTrigger value="woo">WooCommerce & Meili</TabsTrigger>
           <TabsTrigger value="handoff">Handoff</TabsTrigger>
         </TabsList>
@@ -125,13 +126,57 @@ export default function Admin() {
           <Card className="p-6 space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div><Label>Provider</Label>
-                <select className="w-full border rounded h-10 px-2 bg-background" value={settings.ai_provider || "openai"} onChange={e => set("ai_provider", e.target.value)}>
+                <select
+                  className="w-full border rounded h-10 px-2 bg-background"
+                  value={settings.ai_provider || "openai"}
+                  onChange={e => {
+                    const p = e.target.value;
+                    set("ai_provider", p);
+                    if (p === "anthropic") {
+                      set("ai_base_url", "https://api.anthropic.com/v1");
+                      if (!ANTHROPIC_MODELS.includes(settings.ai_model)) set("ai_model", "claude-sonnet-4-5");
+                    } else {
+                      set("ai_base_url", "https://api.openai.com/v1");
+                      if (!OPENAI_MODELS.includes(settings.ai_model)) set("ai_model", "gpt-4o-mini");
+                    }
+                  }}
+                >
                   <option value="openai">OpenAI / Compatível</option>
                   <option value="anthropic">Anthropic</option>
                 </select>
               </div>
               <div><Label>Base URL</Label><Input value={settings.ai_base_url || ""} onChange={e => set("ai_base_url", e.target.value)} placeholder="https://api.openai.com/v1" /></div>
-              <div><Label>Modelo</Label><Input value={settings.ai_model || ""} onChange={e => set("ai_model", e.target.value)} placeholder="gpt-4o-mini" /></div>
+              <div>
+                <Label>Modelo</Label>
+                {(() => {
+                  const provider = settings.ai_provider || "openai";
+                  const list = provider === "anthropic" ? ANTHROPIC_MODELS : OPENAI_MODELS;
+                  const isCustom = settings.ai_model && !list.includes(settings.ai_model);
+                  return (
+                    <>
+                      <select
+                        className="w-full border rounded h-10 px-2 bg-background"
+                        value={isCustom ? "__custom__" : (settings.ai_model || list[0])}
+                        onChange={e => {
+                          if (e.target.value === "__custom__") set("ai_model", "");
+                          else set("ai_model", e.target.value);
+                        }}
+                      >
+                        {list.map(m => <option key={m} value={m}>{m}</option>)}
+                        <option value="__custom__">Custom…</option>
+                      </select>
+                      {(isCustom || !settings.ai_model) && (
+                        <Input
+                          className="mt-2"
+                          value={settings.ai_model || ""}
+                          onChange={e => set("ai_model", e.target.value)}
+                          placeholder="nome do modelo custom"
+                        />
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
               <div><Label>Temperature</Label><Input type="number" step="0.1" value={settings.ai_temperature ?? 0.7} onChange={e => set("ai_temperature", Number(e.target.value))} /></div>
               <div><Label>Max tokens</Label><Input type="number" value={settings.ai_max_tokens ?? 1024} onChange={e => set("ai_max_tokens", Number(e.target.value))} /></div>
             </div>
@@ -139,6 +184,59 @@ export default function Admin() {
             <div className="flex gap-2">
               <Button onClick={saveSettings} disabled={busy}>Guardar</Button>
               <Button variant="outline" onClick={testAi}>Testar ligação</Button>
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="kb">
+          <Card className="p-6 space-y-4">
+            <div>
+              <h3 className="font-semibold">Knowledge Base</h3>
+              <p className="text-sm text-muted-foreground">
+                Sincroniza fontes de dados para o índice Meilisearch usado pela tool <code>search_faq</code> e pela pesquisa de produtos.
+              </p>
+            </div>
+
+            <div className="border rounded-lg p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium">Produtos WooCommerce</div>
+                  <div className="text-xs text-muted-foreground">
+                    Última sync: {settings.kb_products_last_sync ? new Date(settings.kb_products_last_sync).toLocaleString("pt-PT") : "nunca"}
+                    {settings.kb_products_count != null && ` · ${settings.kb_products_count} produtos`}
+                  </div>
+                </div>
+                <Button size="sm" onClick={() => runIngest("ingest-products", "Produtos")} disabled={busy}>
+                  Sincronizar produtos
+                </Button>
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium">FAQs / Páginas</div>
+                  <div className="text-xs text-muted-foreground">
+                    Última sync: {settings.kb_faqs_last_sync ? new Date(settings.kb_faqs_last_sync).toLocaleString("pt-PT") : "nunca"}
+                    {settings.kb_faqs_count != null && ` · ${settings.kb_faqs_count} entradas`}
+                  </div>
+                </div>
+                <Button size="sm" onClick={() => runIngest("ingest-faqs", "FAQs")} disabled={busy}>
+                  Sincronizar FAQs
+                </Button>
+              </div>
+            </div>
+
+            <div className="border rounded-lg p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-medium">Reindexar tudo</div>
+                  <div className="text-xs text-muted-foreground">Limpa o índice Meilisearch e re-ingere todas as fontes.</div>
+                </div>
+                <Button size="sm" variant="destructive" onClick={() => runIngest("ingest-all", "Reindex completo")} disabled={busy}>
+                  Reindexar
+                </Button>
+              </div>
             </div>
           </Card>
         </TabsContent>
