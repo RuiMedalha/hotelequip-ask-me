@@ -26,7 +26,7 @@
 
   // Default iframe src: same origin as the script
   var scriptSrc = (currentScript && currentScript.src) || "";
-  var defaultOrigin = "https://ask.hotelequip.pt";
+  var defaultOrigin = "https://hotelequip-ask-me.lovable.app";
   try {
     if (scriptSrc) defaultOrigin = new URL(scriptSrc).origin;
   } catch (e) {}
