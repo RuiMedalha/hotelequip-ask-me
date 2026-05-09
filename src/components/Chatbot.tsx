@@ -142,6 +142,60 @@ export const Chatbot = () => {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
 
+  const ttsSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+  const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem("he_tts_enabled") === "1";
+  });
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("he_tts_enabled", ttsEnabled ? "1" : "0");
+    }
+    if (!ttsEnabled && ttsSupported) {
+      try { window.speechSynthesis.cancel(); } catch { /* noop */ }
+    }
+  }, [ttsEnabled, ttsSupported]);
+
+  const pickPtVoice = (): SpeechSynthesisVoice | null => {
+    if (!ttsSupported) return null;
+    const voices = window.speechSynthesis.getVoices();
+    const pt = voices.filter(v => v.lang?.toLowerCase().startsWith("pt"));
+    if (pt.length === 0) return null;
+    const female = pt.find(v => /female|mulher|joana|luciana|catarina|ines/i.test(v.name));
+    const ptPt = pt.find(v => v.lang?.toLowerCase() === "pt-pt");
+    return female || ptPt || pt[0];
+  };
+
+  const cleanForSpeech = (s: string) =>
+    s.replace(/!\[.*?\]\(.*?\)/g, "")
+     .replace(/\[(.*?)\]\(.*?\)/g, "$1")
+     .replace(/[#*`]/g, "")
+     .replace(/:[a-z_]+:/g, "")
+     .trim();
+
+  const speak = (text: string) => {
+    if (!ttsSupported || !ttsEnabled) return;
+    const clean = cleanForSpeech(text);
+    if (!clean) return;
+    try {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(clean);
+      u.lang = "pt-PT";
+      const v = pickPtVoice();
+      if (v) u.voice = v;
+      window.speechSynthesis.speak(u);
+    } catch { /* noop */ }
+  };
+
+  // Pre-load voices (some browsers populate async)
+  useEffect(() => {
+    if (!ttsSupported) return;
+    const load = () => window.speechSynthesis.getVoices();
+    load();
+    window.speechSynthesis.onvoiceschanged = load;
+    return () => { try { window.speechSynthesis.onvoiceschanged = null as any; } catch { /* noop */ } };
+  }, [ttsSupported]);
+
   useEffect(() => {
     if (conversationId) localStorage.setItem("he_conversation_id", conversationId);
   }, [conversationId]);
