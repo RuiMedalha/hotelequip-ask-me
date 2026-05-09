@@ -31,6 +31,8 @@ export default function Admin() {
   const [settings, setSettings] = useState<Settings>({});
   const [secrets, setSecrets] = useState<{ key: string; masked: string }[]>([]);
   const [busy, setBusy] = useState(false);
+  const [kbStats, setKbStats] = useState<{ total: number; by_type: Record<string, number> } | null>(null);
+  const [kbUrl, setKbUrl] = useState("");
 
   const load = async () => {
     const { data } = await supabase.from("bot_settings").select("key,value");
@@ -92,8 +94,6 @@ export default function Admin() {
     });
   };
 
-  const [kbStats, setKbStats] = useState<{ total: number; by_type: Record<string, number> } | null>(null);
-  const [kbUrl, setKbUrl] = useState("");
 
   const loadKbStats = async () => {
     try {
