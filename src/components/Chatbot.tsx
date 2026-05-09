@@ -385,7 +385,11 @@ export const Chatbot = () => {
 
   return (
     <div className="flex flex-col h-full max-w-full bg-background">
-      <ChatHeader />
+      <ChatHeader
+        ttsSupported={ttsSupported}
+        ttsEnabled={ttsEnabled}
+        onToggleTts={() => setTtsEnabled(v => !v)}
+      />
       {humanMode && (
         <div className="px-4 py-2 border-b bg-muted/40 flex items-center gap-2">
           <Badge variant="default" className="bg-green-600 hover:bg-green-700">🟢 Agente humano</Badge>
