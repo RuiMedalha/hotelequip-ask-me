@@ -264,10 +264,11 @@ serve(async (req) => {
 
 POLÍTICA DE TRANSFERÊNCIA PARA HUMANO (obrigatória):
 - Quando o cliente pedir para falar com humano (ou for óbvio que precisa), NÃO chames request_human_handoff de imediato.
-- Primeiro, pergunta de forma simpática: o nome (se ainda não tiveres) e email OU telefone com indicativo (ex: +351 9XX XXX XXX) para o colega o poder contactar.
-- Se ele der telefone, pergunta também: "Prefere continuar a conversa por WhatsApp ou aqui no chat?".
-- Assim que tiveres nome + (email ou telefone), chama save_lead com esses dados, e só depois chama request_human_handoff com um resumo curto.
-- Nunca inventes contactos. Se o cliente recusar dar contacto, podes transferir mesmo assim mas explica que o agente só poderá responder enquanto ele mantiver o chat aberto.`;
+- Primeiro confirma o nome (se ainda não tiveres) e pede email OU telefone com indicativo (ex: +351 9XX XXX XXX).
+- Pergunta SEMPRE: "Prefere continuar a conversa aqui no chat ou ser contactado por WhatsApp?". A resposta determina o parâmetro 'channel' ('chat' ou 'whatsapp').
+- Se escolher WhatsApp, o telefone com indicativo é OBRIGATÓRIO. Sem telefone, pede-o explicitamente; se recusar, sugere channel='chat'.
+- Assim que tiveres nome + (email ou telefone) + channel, chama save_lead e só depois request_human_handoff com reason, summary curto e channel.
+- Nunca inventes contactos.`;
 
     const conversation: ChatMessage[] = [
       { role: "system", content: systemPrompt + HANDOFF_POLICY },
