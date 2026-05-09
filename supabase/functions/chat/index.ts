@@ -58,14 +58,15 @@ const TOOLS = [
     type: "function",
     function: {
       name: "request_human_handoff",
-      description: "Passa a conversa para um agente humano (notifica WhatsApp e cria ticket no Chatwoot).",
+      description: "Passa a conversa para um agente humano. Pergunta SEMPRE primeiro se o cliente prefere continuar no chat ou ser contactado por WhatsApp, e passa essa escolha em 'channel'. Se 'whatsapp', o telefone do cliente é OBRIGATÓRIO.",
       parameters: {
         type: "object",
         properties: {
           reason: { type: "string" },
           summary: { type: "string", description: "Resumo curto da conversa" },
+          channel: { type: "string", enum: ["chat", "whatsapp"], description: "Canal escolhido pelo cliente para falar com a equipa." },
         },
-        required: ["reason"],
+        required: ["reason", "channel"],
       },
     },
   },
