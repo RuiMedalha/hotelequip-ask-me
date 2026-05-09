@@ -58,12 +58,12 @@ async function findExistingChatwootContact(base: string, accountId: any, token: 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const { conversation_id, reason, summary } = await req.json();
+    const { conversation_id, reason, summary, channel } = await req.json();
     if (!conversation_id) {
       return new Response(JSON.stringify({ error: "conversation_id is required" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const job = processHandoff(conversation_id, reason, summary);
+    const job = processHandoff(conversation_id, reason, summary, channel);
     if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) EdgeRuntime.waitUntil(job);
     else job.catch((e) => console.error("handoff background fail", e));
 
