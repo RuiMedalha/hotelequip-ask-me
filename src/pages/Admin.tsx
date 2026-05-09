@@ -41,7 +41,7 @@ export default function Admin() {
     setSecrets(Array.isArray(list) ? list : []);
   };
 
-  useEffect(() => { if (isAdmin) load(); }, [isAdmin]);
+  useEffect(() => { if (isAdmin) { load(); loadKbStats(); } }, [isAdmin]);
 
   if (loading) return <div className="p-8">A carregar…</div>;
   if (!session) return <Navigate to="/admin/login" replace />;
@@ -92,18 +92,47 @@ export default function Admin() {
     });
   };
 
-  const runIngest = async (fn: string, label: string) => {
+  const [kbStats, setKbStats] = useState<{ total: number; by_type: Record<string, number> } | null>(null);
+  const [kbUrl, setKbUrl] = useState("");
+
+  const loadKbStats = async () => {
+    try {
+      const r = await callFn("ingest-knowledge", { action: "stats" });
+      if (r && typeof r.total === "number") setKbStats({ total: r.total, by_type: r.by_type || {} });
+    } catch {}
+  };
+
+  const ingestWoo = async () => {
     setBusy(true);
     try {
-      const r = await callFn(fn, {});
-      if (r?.ok || r?.success) {
-        toast({ title: `${label} sincronizado`, description: r.count != null ? `${r.count} entradas` : undefined });
-        await load();
+      const r = await callFn("ingest-knowledge", { action: "ingest_woo" });
+      if (r?.ok) {
+        toast({ title: "Produtos carregados", description: `${r.ingested ?? 0} produtos` });
+        await loadKbStats();
       } else {
-        toast({ title: `${label} falhou`, description: String(r?.error || JSON.stringify(r)).slice(0, 250) });
+        toast({ title: "Falhou", description: String(r?.error || JSON.stringify(r)).slice(0, 250) });
       }
     } catch (e: any) {
-      toast({ title: `${label} falhou`, description: e?.message });
+      toast({ title: "Falhou", description: e?.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ingestUrl = async () => {
+    if (!kbUrl) return;
+    setBusy(true);
+    try {
+      const r = await callFn("ingest-knowledge", { action: "ingest_url", url: kbUrl, source_type: "page" });
+      if (r?.ok) {
+        toast({ title: "Página carregada", description: `${r.ingested ?? 0} chunks${r.title ? ` — ${r.title}` : ""}` });
+        setKbUrl("");
+        await loadKbStats();
+      } else {
+        toast({ title: "Falhou", description: String(r?.error || JSON.stringify(r)).slice(0, 250) });
+      }
+    } catch (e: any) {
+      toast({ title: "Falhou", description: e?.message });
     } finally {
       setBusy(false);
     }
@@ -165,7 +194,9 @@ export default function Admin() {
                   <option value="anthropic">Anthropic</option>
                 </select>
               </div>
-              <div><Label>Base URL</Label><Input value={settings.ai_base_url || ""} onChange={e => set("ai_base_url", e.target.value)} placeholder="https://api.openai.com/v1" /></div>
+              {(settings.ai_provider || "openai") !== "anthropic" && (
+                <div><Label>Base URL</Label><Input value={settings.ai_base_url || ""} onChange={e => set("ai_base_url", e.target.value)} placeholder="https://api.openai.com/v1" /></div>
+              )}
               <div>
                 <Label>Modelo</Label>
                 {(() => {
@@ -211,53 +242,50 @@ export default function Admin() {
         <TabsContent value="kb">
           <Card className="p-6 space-y-4">
             <div>
-              <h3 className="font-semibold">Knowledge Base</h3>
-              <p className="text-sm text-muted-foreground">
-                Sincroniza fontes de dados para o índice Meilisearch usado pela tool <code>search_faq</code> e pela pesquisa de produtos.
+              <h3 className="font-semibold">📚 Knowledge Base</h3>
+              {kbStats ? (
+                <p className="text-sm text-muted-foreground">
+                  {kbStats.total} itens
+                  {Object.keys(kbStats.by_type).length > 0 && " — "}
+                  {Object.entries(kbStats.by_type).map(([k, v]) => `${v} ${k}`).join(" · ")}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">A carregar estatísticas…</p>
+              )}
+            </div>
+
+            <div className="border rounded-lg p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="font-medium">Produtos WooCommerce</div>
+                <Button size="sm" onClick={ingestWoo} disabled={busy}>
+                  🔄 Carregar Produtos
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Ingere todos os produtos do WooCommerce usando as credenciais já configuradas.
               </p>
             </div>
 
             <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">Produtos WooCommerce</div>
-                  <div className="text-xs text-muted-foreground">
-                    Última sync: {settings.kb_products_last_sync ? new Date(settings.kb_products_last_sync).toLocaleString("pt-PT") : "nunca"}
-                    {settings.kb_products_count != null && ` · ${settings.kb_products_count} produtos`}
-                  </div>
-                </div>
-                <Button size="sm" onClick={() => runIngest("ingest-products", "Produtos")} disabled={busy}>
-                  Sincronizar produtos
+              <div className="font-medium">Páginas do Site</div>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="https://hotelequip.pt/sobre-nos"
+                  value={kbUrl}
+                  onChange={e => setKbUrl(e.target.value)}
+                />
+                <Button size="sm" onClick={ingestUrl} disabled={busy || !kbUrl}>
+                  🌐 Carregar Página
                 </Button>
               </div>
             </div>
 
-            <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">FAQs / Páginas</div>
-                  <div className="text-xs text-muted-foreground">
-                    Última sync: {settings.kb_faqs_last_sync ? new Date(settings.kb_faqs_last_sync).toLocaleString("pt-PT") : "nunca"}
-                    {settings.kb_faqs_count != null && ` · ${settings.kb_faqs_count} entradas`}
-                  </div>
-                </div>
-                <Button size="sm" onClick={() => runIngest("ingest-faqs", "FAQs")} disabled={busy}>
-                  Sincronizar FAQs
-                </Button>
+            {kbStats && (
+              <div className="text-xs text-muted-foreground border-t pt-3">
+                Itens na base:{" "}
+                {Object.entries(kbStats.by_type).map(([k, v]) => `${k} (${v})`).join(" · ") || "vazio"}
               </div>
-            </div>
-
-            <div className="border rounded-lg p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">Reindexar tudo</div>
-                  <div className="text-xs text-muted-foreground">Limpa o índice Meilisearch e re-ingere todas as fontes.</div>
-                </div>
-                <Button size="sm" variant="destructive" onClick={() => runIngest("ingest-all", "Reindex completo")} disabled={busy}>
-                  Reindexar
-                </Button>
-              </div>
-            </div>
+            )}
           </Card>
         </TabsContent>
 
