@@ -94,8 +94,6 @@ export default function Admin() {
     });
   };
 
-  const [kbStats, setKbStats] = useState<{ total: number; by_type: Record<string, number> } | null>(null);
-  const [kbUrl, setKbUrl] = useState("");
 
   const loadKbStats = async () => {
     try {
