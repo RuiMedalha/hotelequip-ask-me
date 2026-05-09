@@ -156,23 +156,30 @@ async function executeTool(
     const hasName = !!lead?.name;
     const hasEmail = !!lead?.email;
     const hasPhone = !!(lead?.phone && /^\+?\d{8,}$/.test(String(lead.phone).replace(/\s/g, "")));
-    // Exigir que save_lead tenha sido chamado NESTA sessão (confirma que o cliente acabou de dar/confirmar contactos)
+    const channel = args.channel === "whatsapp" ? "whatsapp" : "chat";
+    // WhatsApp exige telefone válido. Sem ele, força fallback para chat e pede telefone.
+    if (channel === "whatsapp" && !hasPhone) {
+      return JSON.stringify({
+        error: "missing_phone_for_whatsapp",
+        instruction: "Para WhatsApp precisamos do número de telefone do cliente com indicativo (+351 9XX XXX XXX). Pede o telefone, chama save_lead com ele, e só depois chama request_human_handoff novamente com channel='whatsapp'. Se o cliente não quiser dar telefone, sugere channel='chat'.",
+      });
+    }
     if (!ctx.sessionLeadSaved.value || !hasName || (!hasEmail && !hasPhone)) {
       return JSON.stringify({
         error: "missing_contact",
-        instruction: "OBRIGATÓRIO antes de transferir: (1) pergunta o nome se ainda não foi confirmado nesta conversa, (2) pergunta email OU telefone com indicativo (+351 9XX XXX XXX). Se der telefone, pergunta se prefere WhatsApp ou continuar no chat. Depois chama save_lead com os dados confirmados e SÓ DEPOIS chama request_human_handoff. Não assumas dados de conversas antigas.",
+        instruction: "OBRIGATÓRIO antes de transferir: (1) confirma o nome, (2) pergunta email OU telefone com indicativo. (3) Pergunta se prefere continuar no chat ou no WhatsApp e passa essa escolha em 'channel'. Chama save_lead com os dados confirmados e SÓ DEPOIS chama request_human_handoff.",
         have: { name: hasName, email: hasEmail, phone: hasPhone, confirmedThisSession: ctx.sessionLeadSaved.value },
       });
     }
-    await admin.from("conversations").update({ status: "handoff" }).eq("id", ctx.conversationId);
+    await admin.from("conversations").update({ status: "handoff", channel }).eq("id", ctx.conversationId);
     try {
       await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/handoff`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` },
-        body: JSON.stringify({ conversation_id: ctx.conversationId, reason: args.reason, summary: args.summary }),
+        body: JSON.stringify({ conversation_id: ctx.conversationId, reason: args.reason, summary: args.summary, channel }),
       });
     } catch (e) { console.error("handoff trigger fail", e); }
-    return JSON.stringify({ ok: true, message: ctx.settings.handoff_message });
+    return JSON.stringify({ ok: true, channel, message: ctx.settings.handoff_message });
   }
   return JSON.stringify({ error: "unknown tool" });
 }
