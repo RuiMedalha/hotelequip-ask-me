@@ -292,7 +292,7 @@ export const Chatbot = () => {
     window.speechSynthesis.onvoiceschanged = load;
     return () => {
       try {
-        window.speechSynthesis.onvoiceschanged = null as any;
+        window.speechSynthesis.onvoiceschanged = null;
         window.speechSynthesis.cancel();
       } catch { /* noop */ }
     };
@@ -321,11 +321,12 @@ export const Chatbot = () => {
           .order("created_at");
         if (cancelled) return;
         if (data && data.length > 0) {
-          for (const m of data) seenIdsRef.current.add(m.id);
-          setMessages(data.map((m: any) => ({
+          const rows = data as StoredMessageRow[];
+          for (const m of rows) seenIdsRef.current.add(m.id);
+          setMessages(rows.map((m) => ({
             id: m.id, text: m.content, isUser: m.role === "user", timestamp: new Date(m.created_at),
           })));
-          setHistory(data.map((m: any) => ({ role: m.role, content: m.content })));
+          setHistory(rows.map((m) => ({ role: m.role, content: m.content })));
           setShowIntentMenu(false);
         } else {
           setMessages([{ id: "welcome", text: welcome, isUser: false, timestamp: new Date() }]);
@@ -333,9 +334,10 @@ export const Chatbot = () => {
         }
         const { data: conv } = await supabase
           .from("conversations").select("mode, chatwoot_pubsub_token").eq("id", conversationId).maybeSingle();
-        if (!cancelled && (conv as any)?.mode === "human") {
+        const row = conv as ConversationRow | null;
+        if (!cancelled && row?.mode === "human") {
           setHumanMode(true);
-          setChatwootLive(!!(conv as any)?.chatwoot_pubsub_token);
+          setChatwootLive(!!row.chatwoot_pubsub_token);
         }
       } else {
         setMessages([{ id: "welcome", text: welcome, isUser: false, timestamp: new Date() }]);
