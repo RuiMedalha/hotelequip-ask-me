@@ -35,8 +35,11 @@ serve(async (req) => {
       .maybeSingle();
 
     if (action === "status") {
-      return new Response(JSON.stringify({ ok: true, mode: (conv as any)?.mode || "bot" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      return json({
+        ok: true,
+        mode: (conv as any)?.mode || "bot",
+        chatwoot_live: !!(conv as any)?.chatwoot_pubsub_token,
+        chatwoot_connected: !!((conv as any)?.chatwoot_conversation_id && (conv as any)?.chatwoot_source_id),
       });
     }
 
