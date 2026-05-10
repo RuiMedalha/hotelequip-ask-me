@@ -44,6 +44,13 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
     setHasMR(hasMediaRecorderSupport());
   }, []);
 
+  useEffect(() => {
+    return () => {
+      try { recognitionRef.current?.stop(); } catch { /* noop */ }
+      try { mediaRecorderRef.current?.stop(); } catch { /* noop */ }
+    };
+  }, []);
+
   const micSupported = hasSR || hasMR;
   const micBusy = listening || recording || transcribing;
 
