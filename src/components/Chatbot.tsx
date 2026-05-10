@@ -508,7 +508,7 @@ export const Chatbot = () => {
           });
         }
         setMessages(p => [...p, ...newMsgs]);
-        speak(reply);
+        if (reply) speak(reply);
         if (data.mode === "human") setHumanMode(true);
       }
     } catch (e: any) {
