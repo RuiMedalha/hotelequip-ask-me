@@ -147,12 +147,14 @@ export const Chatbot = () => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem("he_tts_enabled") === "1";
   });
+  const [speaking, setSpeaking] = useState(false);
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("he_tts_enabled", ttsEnabled ? "1" : "0");
     }
     if (!ttsEnabled && ttsSupported) {
       try { window.speechSynthesis.cancel(); } catch { /* noop */ }
+      setSpeaking(false);
     }
   }, [ttsEnabled, ttsSupported]);
 
@@ -173,27 +175,62 @@ export const Chatbot = () => {
      .replace(/:[a-z_]+:/g, "")
      .trim();
 
+  const buildUtterance = (text: string) => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "pt-PT";
+    const v = pickPtVoice();
+    if (v) u.voice = v;
+    u.onstart = () => setSpeaking(true);
+    u.onend = () => {
+      if (!window.speechSynthesis.pending && !window.speechSynthesis.speaking) {
+        setSpeaking(false);
+      }
+    };
+    u.onerror = () => setSpeaking(false);
+    return u;
+  };
+
+  // Replace current speech (used for non-stream full reply)
   const speak = (text: string) => {
     if (!ttsSupported || !ttsEnabled) return;
     const clean = cleanForSpeech(text);
     if (!clean) return;
     try {
       window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(clean);
-      u.lang = "pt-PT";
-      const v = pickPtVoice();
-      if (v) u.voice = v;
-      window.speechSynthesis.speak(u);
+      window.speechSynthesis.speak(buildUtterance(clean));
     } catch { /* noop */ }
   };
 
-  // Pre-load voices (some browsers populate async)
+  // Queue speech (used for streaming, sentence-by-sentence)
+  const enqueueSpeech = (text: string) => {
+    if (!ttsSupported || !ttsEnabled) return;
+    const clean = cleanForSpeech(text);
+    if (!clean) return;
+    try {
+      window.speechSynthesis.speak(buildUtterance(clean));
+    } catch { /* noop */ }
+  };
+
+  // Barge-in: stop TTS the moment the user starts dictating
+  const handleMicStart = () => {
+    if (ttsSupported) {
+      try { window.speechSynthesis.cancel(); } catch { /* noop */ }
+      setSpeaking(false);
+    }
+  };
+
+  // Pre-load voices + cleanup TTS on unmount
   useEffect(() => {
     if (!ttsSupported) return;
     const load = () => window.speechSynthesis.getVoices();
     load();
     window.speechSynthesis.onvoiceschanged = load;
-    return () => { try { window.speechSynthesis.onvoiceschanged = null as any; } catch { /* noop */ } };
+    return () => {
+      try {
+        window.speechSynthesis.onvoiceschanged = null as any;
+        window.speechSynthesis.cancel();
+      } catch { /* noop */ }
+    };
   }, [ttsSupported]);
 
   useEffect(() => {
@@ -302,33 +339,123 @@ export const Chatbot = () => {
       if (intent) body.intent = intent;
       const r = await fetch(`${FUNCTIONS_URL}/chat`, {
         method: "POST",
-        headers: await authHeaders(),
+        headers: { ...(await authHeaders()), Accept: "text/event-stream" },
         body: JSON.stringify(body),
       });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || "Erro");
+      if (!r.ok) {
+        let msg = "Erro";
+        try { const j = await r.json(); msg = j.error || msg; } catch { /* noop */ }
+        throw new Error(msg);
+      }
       if (intent) setPendingIntent(null);
-      if (data.conversation_id) setConversationId(data.conversation_id);
-      const reply = data.reply || "(sem resposta)";
-      setHistory(h => [...h, { role: "assistant", content: reply }]);
+
+      const ctype = r.headers.get("content-type") || "";
+      const isStream = ctype.includes("text/event-stream") && !!r.body;
 
       const baseId = Date.now().toString();
-      const newMsgs: Message[] = [
-        { id: baseId + "b", text: reply, isUser: false, timestamp: new Date() },
-      ];
-      const actions: UiAction[] = Array.isArray(data.ui_actions) ? data.ui_actions : [];
-      actions.forEach((ui, i) => {
-        newMsgs.push({
-          id: `${baseId}-ui-${i}`,
-          text: "",
-          isUser: false,
-          timestamp: new Date(),
-          ui,
+      const botMsgId = baseId + "b";
+
+      if (isStream) {
+        // Create empty bot message we'll progressively fill
+        setMessages(p => [...p, { id: botMsgId, text: "", isUser: false, timestamp: new Date() }]);
+        setIsTyping(false);
+
+        const reader = r.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullText = "";
+        let spokenUpTo = 0; // index up to which we've already spoken
+        let finalPayload: any = null;
+
+        const flushSentences = (final = false) => {
+          if (!ttsEnabled || !ttsSupported) return;
+          const pending = fullText.slice(spokenUpTo);
+          if (!pending) return;
+          // Find last sentence terminator
+          const re = /[.!?…]+[\s)"']*/g;
+          let lastEnd = -1;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(pending)) !== null) lastEnd = m.index + m[0].length;
+          if (lastEnd > 0) {
+            const chunk = pending.slice(0, lastEnd).trim();
+            if (chunk) enqueueSpeech(chunk);
+            spokenUpTo += lastEnd;
+          } else if (final) {
+            const chunk = pending.trim();
+            if (chunk) enqueueSpeech(chunk);
+            spokenUpTo = fullText.length;
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || "";
+          for (const ev of events) {
+            const line = ev.split("\n").find(l => l.startsWith("data:"));
+            if (!line) continue;
+            const payload = line.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const obj = JSON.parse(payload);
+              if (obj.token) {
+                fullText += obj.token;
+                setMessages(p => p.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
+                flushSentences(false);
+              }
+              if (obj.done) finalPayload = obj;
+              if (obj.error) throw new Error(obj.error);
+            } catch (err) {
+              // ignore malformed event
+            }
+          }
+        }
+        flushSentences(true);
+
+        const reply = fullText || "(sem resposta)";
+        setHistory(h => [...h, { role: "assistant", content: reply }]);
+
+        if (finalPayload?.conversation_id) setConversationId(finalPayload.conversation_id);
+        const actions: UiAction[] = Array.isArray(finalPayload?.ui_actions) ? finalPayload.ui_actions : [];
+        if (actions.length) {
+          setMessages(p => [
+            ...p,
+            ...actions.map((ui, i) => ({
+              id: `${baseId}-ui-${i}`,
+              text: "",
+              isUser: false,
+              timestamp: new Date(),
+              ui,
+            })),
+          ]);
+        }
+        if (finalPayload?.mode === "human") setHumanMode(true);
+      } else {
+        // Fallback: classic JSON response
+        const data = await r.json();
+        if (data.conversation_id) setConversationId(data.conversation_id);
+        const reply = data.reply || "(sem resposta)";
+        setHistory(h => [...h, { role: "assistant", content: reply }]);
+
+        const newMsgs: Message[] = [
+          { id: botMsgId, text: reply, isUser: false, timestamp: new Date() },
+        ];
+        const actions: UiAction[] = Array.isArray(data.ui_actions) ? data.ui_actions : [];
+        actions.forEach((ui, i) => {
+          newMsgs.push({
+            id: `${baseId}-ui-${i}`,
+            text: "",
+            isUser: false,
+            timestamp: new Date(),
+            ui,
+          });
         });
-      });
-      setMessages(p => [...p, ...newMsgs]);
-      speak(reply);
-      if (data.mode === "human") setHumanMode(true);
+        setMessages(p => [...p, ...newMsgs]);
+        speak(reply);
+        if (data.mode === "human") setHumanMode(true);
+      }
     } catch (e: any) {
       setMessages(p => [...p, {
         id: Date.now().toString() + "e",
@@ -388,6 +515,7 @@ export const Chatbot = () => {
       <ChatHeader
         ttsSupported={ttsSupported}
         ttsEnabled={ttsEnabled}
+        speaking={speaking}
         onToggleTts={() => setTtsEnabled(v => !v)}
       />
       {humanMode && (
@@ -445,7 +573,7 @@ export const Chatbot = () => {
           {isTyping && <TypingIndicator />}
         </div>
       </ScrollArea>
-      <ChatInput onSendMessage={handleSendMessage} disabled={isTyping} />
+      <ChatInput onSendMessage={handleSendMessage} onMicStart={handleMicStart} disabled={isTyping} />
     </div>
   );
 };
