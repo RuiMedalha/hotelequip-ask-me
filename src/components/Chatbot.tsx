@@ -570,10 +570,11 @@ export const Chatbot = () => {
         if (reply) speak(reply);
         if (data.mode === "human") setHumanMode(true);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
       setMessages(p => [...p, {
         id: Date.now().toString() + "e",
-        text: `⚠️ ${e.message}`,
+        text: `⚠️ ${message}`,
         isUser: false,
         timestamp: new Date(),
       }]);
