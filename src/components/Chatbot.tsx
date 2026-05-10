@@ -335,6 +335,7 @@ export const Chatbot = () => {
         messages: newHistory,
         visitor_id: getVisitorId(),
         conversation_id: conversationId,
+        stream: true,
       };
       if (intent) body.intent = intent;
       const r = await fetch(`${FUNCTIONS_URL}/chat`, {
