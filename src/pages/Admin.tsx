@@ -394,6 +394,12 @@ export default function Admin() {
             <Button onClick={saveSettings} disabled={busy}>Guardar</Button>
           </Card>
         </TabsContent>
+
+        <TabsContent value="automations">
+          <Card className="p-6">
+            <WebhooksTab />
+          </Card>
+        </TabsContent>
       </Tabs>
     </div>
   );
