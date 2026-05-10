@@ -493,12 +493,14 @@ export const Chatbot = () => {
   };
 
   const handleSendMessage = async (text: string) => {
+    unlockTts();
     setShowIntentMenu(false);
     pushUserMessage(text);
     await sendToBackend(text);
   };
 
   const handleIntentPick = async (label: string, value: string) => {
+    unlockTts();
     setShowIntentMenu(false);
     setPendingIntent(value);
     if (value === "outro") {
@@ -514,12 +516,14 @@ export const Chatbot = () => {
   };
 
   const handleUiSubmit = async (id: string, value: string) => {
+    unlockTts();
     consumeUi(id);
     pushUserMessage(value);
     await sendToBackend(value);
   };
 
   const handleQuickReply = async (id: string, label: string, value: string) => {
+    unlockTts();
     consumeUi(id);
     pushUserMessage(label);
     await sendToBackend(value);
