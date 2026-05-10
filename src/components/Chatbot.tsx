@@ -23,6 +23,36 @@ interface Message {
   consumed?: boolean;
 }
 
+interface StoredMessageRow {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+interface ConversationRow {
+  mode?: string | null;
+  chatwoot_pubsub_token?: string | null;
+}
+
+interface ChatwootMessage {
+  id: string | number;
+  content: string;
+  created_at: string;
+}
+
+interface ChatPayload {
+  conversation_id?: string;
+  reply?: string | null;
+  ui_actions?: UiAction[];
+  channel?: string;
+  whatsapp_link?: string;
+  mode?: string | null;
+  token?: string;
+  done?: boolean;
+  error?: string;
+}
+
 const INTENT_OPTIONS: { label: string; value: string }[] = [
   { label: "🛒 Produtos & Preços", value: "produtos" },
   { label: "🔧 Questões Técnicas", value: "tecnico" },
@@ -157,6 +187,7 @@ export const Chatbot = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [welcome, setWelcome] = useState("Olá! 👋 Sou o assistente da HotelEquip. Como posso ajudar?");
   const [humanMode, setHumanMode] = useState(false);
+  const [chatwootLive, setChatwootLive] = useState(false);
   const [showIntentMenu, setShowIntentMenu] = useState(false);
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -261,7 +292,7 @@ export const Chatbot = () => {
     window.speechSynthesis.onvoiceschanged = load;
     return () => {
       try {
-        window.speechSynthesis.onvoiceschanged = null as any;
+        window.speechSynthesis.onvoiceschanged = null;
         window.speechSynthesis.cancel();
       } catch { /* noop */ }
     };
@@ -290,19 +321,24 @@ export const Chatbot = () => {
           .order("created_at");
         if (cancelled) return;
         if (data && data.length > 0) {
-          for (const m of data) seenIdsRef.current.add(m.id);
-          setMessages(data.map((m: any) => ({
+          const rows = data as StoredMessageRow[];
+          for (const m of rows) seenIdsRef.current.add(m.id);
+          setMessages(rows.map((m) => ({
             id: m.id, text: m.content, isUser: m.role === "user", timestamp: new Date(m.created_at),
           })));
-          setHistory(data.map((m: any) => ({ role: m.role, content: m.content })));
+          setHistory(rows.map((m) => ({ role: m.role, content: m.content })));
           setShowIntentMenu(false);
         } else {
           setMessages([{ id: "welcome", text: welcome, isUser: false, timestamp: new Date() }]);
           setShowIntentMenu(true);
         }
         const { data: conv } = await supabase
-          .from("conversations").select("mode").eq("id", conversationId).maybeSingle();
-        if (!cancelled && (conv as any)?.mode === "human") setHumanMode(true);
+          .from("conversations").select("mode, chatwoot_pubsub_token").eq("id", conversationId).maybeSingle();
+        const row = conv as ConversationRow | null;
+        if (!cancelled && row?.mode === "human") {
+          setHumanMode(true);
+          setChatwootLive(!!row.chatwoot_pubsub_token);
+        }
       } else {
         setMessages([{ id: "welcome", text: welcome, isUser: false, timestamp: new Date() }]);
         setShowIntentMenu(true);
@@ -317,9 +353,25 @@ export const Chatbot = () => {
     if (el) (el as HTMLElement).scrollTop = el.scrollHeight;
   }, [messages, isTyping, showIntentMenu]);
 
+  useEffect(() => {
+    if (!humanMode || chatwootLive || !conversationId || !isSupabaseConfigured) return;
+    let active = true;
+    const refresh = async () => {
+      const { data } = await supabase
+        .from("conversations")
+        .select("chatwoot_pubsub_token")
+        .eq("id", conversationId)
+        .maybeSingle();
+      if (active && (data as ConversationRow | null)?.chatwoot_pubsub_token) setChatwootLive(true);
+    };
+    refresh();
+    const t = setInterval(refresh, 4000);
+    return () => { active = false; clearInterval(t); };
+  }, [humanMode, chatwootLive, conversationId]);
+
   // Polling no modo humano
   useEffect(() => {
-    if (!humanMode || !conversationId) return;
+    if (!humanMode || !chatwootLive || !conversationId) return;
     let active = true;
     const poll = async () => {
       try {
@@ -328,12 +380,13 @@ export const Chatbot = () => {
           headers: await authHeaders(),
           body: JSON.stringify({ conversation_id: conversationId, action: "poll" }),
         });
-        const data = await r.json();
+        const data = await r.json().catch(() => ({})) as { new_messages?: ChatwootMessage[] };
+        if (!r.ok) return;
         if (!active || !data?.new_messages?.length) return;
         setMessages(prev => {
           const add = data.new_messages
-            .filter((m: any) => !seenIdsRef.current.has(`cw-${m.id}`))
-            .map((m: any) => {
+            .filter((m) => !seenIdsRef.current.has(`cw-${m.id}`))
+            .map((m) => {
               seenIdsRef.current.add(`cw-${m.id}`);
               return { id: `cw-${m.id}`, text: m.content, isUser: false, timestamp: new Date(m.created_at) };
             });
@@ -344,7 +397,7 @@ export const Chatbot = () => {
     poll();
     const t = setInterval(poll, 4000);
     return () => { active = false; clearInterval(t); };
-  }, [humanMode, conversationId]);
+  }, [humanMode, chatwootLive, conversationId]);
 
   const sendToBackend = async (text: string, intentOverride?: string) => {
     setIsTyping(true);
@@ -365,7 +418,13 @@ export const Chatbot = () => {
       const newHistory = [...history, { role: "user" as const, content: text }];
       setHistory(newHistory);
       const intent = intentOverride ?? pendingIntent;
-      const body: any = {
+      const body: {
+        messages: { role: "user" | "assistant"; content: string }[];
+        visitor_id: string;
+        conversation_id: string | null;
+        stream: boolean;
+        intent?: string;
+      } = {
         messages: newHistory,
         visitor_id: getVisitorId(),
         conversation_id: conversationId,
@@ -400,7 +459,7 @@ export const Chatbot = () => {
         let buffer = "";
         let fullText = "";
         let spokenUpTo = 0; // index up to which we've already spoken
-        let finalPayload: any = null;
+        let finalPayload: ChatPayload | null = null;
 
         const flushSentences = (final = false) => {
           if (!ttsEnabled || !ttsSupported) return;
@@ -434,7 +493,7 @@ export const Chatbot = () => {
             const payload = line.slice(5).trim();
             if (!payload || payload === "[DONE]") continue;
             try {
-              const obj = JSON.parse(payload);
+              const obj = JSON.parse(payload) as ChatPayload;
               if (obj.token) {
                 fullText += obj.token;
                 setMessages(p => p.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
@@ -511,10 +570,11 @@ export const Chatbot = () => {
         if (reply) speak(reply);
         if (data.mode === "human") setHumanMode(true);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
       setMessages(p => [...p, {
         id: Date.now().toString() + "e",
-        text: `⚠️ ${e.message}`,
+        text: `⚠️ ${message}`,
         isUser: false,
         timestamp: new Date(),
       }]);

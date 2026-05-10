@@ -7,10 +7,20 @@ async function safeJson(res: Response) {
   try { return t ? JSON.parse(t) : {}; } catch { return { raw: t }; }
 }
 
+function json(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  let action = "";
   try {
-    const { conversation_id, action, content } = await req.json();
+    const body = await req.json();
+    action = body.action;
+    const { conversation_id, content } = body;
     if (!conversation_id || !action) throw new Error("conversation_id and action required");
 
     const admin = adminClient();
@@ -25,8 +35,11 @@ serve(async (req) => {
       .maybeSingle();
 
     if (action === "status") {
-      return new Response(JSON.stringify({ ok: true, mode: (conv as any)?.mode || "bot" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      return json({
+        ok: true,
+        mode: (conv as any)?.mode || "bot",
+        chatwoot_live: !!(conv as any)?.chatwoot_pubsub_token,
+        chatwoot_connected: !!((conv as any)?.chatwoot_conversation_id && (conv as any)?.chatwoot_source_id),
       });
     }
 
@@ -92,8 +105,9 @@ serve(async (req) => {
 
     throw new Error(`unknown action: ${action}`);
   } catch (e: any) {
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    if (action === "poll" && String(e?.message || e).includes("Chatwoot poll failed")) {
+      return json({ ok: true, fallback: true, reason: "poll_error", new_messages: [] });
+    }
+    return json({ error: e.message }, 500);
   }
 });
