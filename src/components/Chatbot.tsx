@@ -323,7 +323,7 @@ export const Chatbot = () => {
 
   // Polling no modo humano
   useEffect(() => {
-    if (!humanMode || !conversationId) return;
+    if (!humanMode || !chatwootLive || !conversationId) return;
     let active = true;
     const poll = async () => {
       try {
@@ -332,7 +332,8 @@ export const Chatbot = () => {
           headers: await authHeaders(),
           body: JSON.stringify({ conversation_id: conversationId, action: "poll" }),
         });
-        const data = await r.json();
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) return;
         if (!active || !data?.new_messages?.length) return;
         setMessages(prev => {
           const add = data.new_messages
@@ -348,7 +349,7 @@ export const Chatbot = () => {
     poll();
     const t = setInterval(poll, 4000);
     return () => { active = false; clearInterval(t); };
-  }, [humanMode, conversationId]);
+  }, [humanMode, chatwootLive, conversationId]);
 
   const sendToBackend = async (text: string, intentOverride?: string) => {
     setIsTyping(true);
