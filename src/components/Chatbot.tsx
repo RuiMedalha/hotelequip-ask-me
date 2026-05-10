@@ -592,7 +592,12 @@ export const Chatbot = () => {
           {isTyping && <TypingIndicator />}
         </div>
       </ScrollArea>
-      <ChatInput onSendMessage={handleSendMessage} onMicStart={handleMicStart} disabled={isTyping} />
+      <ChatInput
+        onSendMessage={handleSendMessage}
+        onMicStart={handleMicStart}
+        disabled={isTyping || humanMode || hasPendingInput}
+        pendingInput={hasPendingInput}
+      />
     </div>
   );
 };
