@@ -467,6 +467,15 @@ export const Chatbot = () => {
           ]);
         }
         if (finalPayload?.mode === "human") setHumanMode(true);
+        if (finalPayload?.channel === "whatsapp" && finalPayload?.whatsapp_link) {
+          setMessages(p => [...p, {
+            id: `${baseId}-wa`,
+            text: "",
+            isUser: false,
+            timestamp: new Date(),
+            ui: { type: "whatsapp_handoff", link: finalPayload.whatsapp_link },
+          }]);
+        }
       } else {
         // Fallback: classic JSON response
         const data = await r.json();
@@ -487,6 +496,15 @@ export const Chatbot = () => {
             ui,
           });
         });
+        if (data.channel === "whatsapp" && data.whatsapp_link) {
+          newMsgs.push({
+            id: `${baseId}-wa`,
+            text: "",
+            isUser: false,
+            timestamp: new Date(),
+            ui: { type: "whatsapp_handoff", link: data.whatsapp_link },
+          });
+        }
         setMessages(p => [...p, ...newMsgs]);
         speak(reply);
         if (data.mode === "human") setHumanMode(true);
