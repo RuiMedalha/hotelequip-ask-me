@@ -11,7 +11,8 @@ import { supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY, isSupabaseConfigured } from
 
 type UiAction =
   | { type: "request_input"; input_type: "email" | "phone"; message: string }
-  | { type: "quick_replies"; message: string; options: { label: string; value: string }[] };
+  | { type: "quick_replies"; message: string; options: { label: string; value: string }[] }
+  | { type: "whatsapp_handoff"; link: string };
 
 interface Message {
   id: string;
@@ -125,6 +126,25 @@ const QuickReplies = ({
         </Button>
       ))}
     </div>
+  </div>
+);
+
+const WhatsAppHandoffCard = ({ link }: { link: string }) => (
+  <div className="rounded-lg border bg-[#25D366]/10 border-[#25D366]/40 p-4 space-y-3">
+    <p className="text-sm font-medium">📱 A nossa equipa já foi notificada.</p>
+    <p className="text-sm text-muted-foreground">Clica para continuar a conversa por WhatsApp:</p>
+    <a
+      href={link}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#25D366] text-white font-medium hover:bg-[#1ebe57] transition-colors no-underline shadow-sm"
+    >
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+        <path d="M20.52 3.48A11.86 11.86 0 0 0 12.04 0C5.5 0 .2 5.3.2 11.84c0 2.09.55 4.13 1.59 5.93L0 24l6.4-1.68a11.83 11.83 0 0 0 5.64 1.44h.01c6.54 0 11.84-5.3 11.84-11.84 0-3.16-1.23-6.13-3.37-8.44ZM12.05 21.5h-.01a9.6 9.6 0 0 1-4.9-1.34l-.35-.21-3.8 1 1.02-3.7-.23-.38a9.6 9.6 0 0 1-1.47-5.05c0-5.31 4.32-9.63 9.64-9.63 2.57 0 4.99 1 6.81 2.82a9.56 9.56 0 0 1 2.82 6.82c0 5.31-4.32 9.67-9.53 9.67Zm5.55-7.22c-.3-.15-1.8-.89-2.08-.99-.28-.1-.48-.15-.69.15-.2.3-.79.99-.97 1.19-.18.2-.36.22-.66.07-.3-.15-1.27-.47-2.42-1.5-.9-.8-1.5-1.78-1.68-2.08-.18-.3-.02-.46.13-.61.13-.13.3-.36.45-.53.15-.18.2-.3.3-.5.1-.2.05-.38-.02-.53-.07-.15-.69-1.66-.94-2.27-.25-.6-.5-.52-.69-.53l-.59-.01c-.2 0-.53.07-.81.38-.28.3-1.06 1.04-1.06 2.54s1.09 2.95 1.24 3.15c.15.2 2.15 3.28 5.21 4.6.73.31 1.3.5 1.74.64.73.23 1.4.2 1.92.12.59-.09 1.8-.74 2.06-1.45.25-.71.25-1.31.18-1.45-.07-.13-.27-.2-.57-.35Z"/>
+      </svg>
+      Abrir WhatsApp →
+    </a>
+    <p className="text-xs text-muted-foreground">A equipa responde em breve.</p>
   </div>
 );
 
@@ -447,6 +467,15 @@ export const Chatbot = () => {
           ]);
         }
         if (finalPayload?.mode === "human") setHumanMode(true);
+        if (finalPayload?.channel === "whatsapp" && finalPayload?.whatsapp_link) {
+          setMessages(p => [...p, {
+            id: `${baseId}-wa`,
+            text: "",
+            isUser: false,
+            timestamp: new Date(),
+            ui: { type: "whatsapp_handoff", link: finalPayload.whatsapp_link },
+          }]);
+        }
       } else {
         // Fallback: classic JSON response
         const data = await r.json();
@@ -467,6 +496,15 @@ export const Chatbot = () => {
             ui,
           });
         });
+        if (data.channel === "whatsapp" && data.whatsapp_link) {
+          newMsgs.push({
+            id: `${baseId}-wa`,
+            text: "",
+            isUser: false,
+            timestamp: new Date(),
+            ui: { type: "whatsapp_handoff", link: data.whatsapp_link },
+          });
+        }
         setMessages(p => [...p, ...newMsgs]);
         speak(reply);
         if (data.mode === "human") setHumanMode(true);
@@ -566,6 +604,9 @@ export const Chatbot = () => {
                     onPick={(label, value) => handleQuickReply(m.id, label, value)}
                   />
                 );
+              }
+              if (m.ui.type === "whatsapp_handoff") {
+                return <WhatsAppHandoffCard key={m.id} link={m.ui.link} />;
               }
             }
             if (!m.text) return null;
