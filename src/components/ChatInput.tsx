@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Send, Mic, MicOff } from "lucide-react";
+import { Send, Mic, MicOff, Loader2 } from "lucide-react";
+import { supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY } from "@/integrations/supabase/client";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
@@ -14,16 +15,37 @@ function getSpeechRecognition(): any {
   return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
 }
 
+function hasMediaRecorderSupport(): boolean {
+  if (typeof window === "undefined") return false;
+  return !!((window as any).MediaRecorder && navigator.mediaDevices?.getUserMedia);
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return {
+    apikey: SUPABASE_ANON_KEY as string,
+    Authorization: `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+  };
+}
+
 export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProps) => {
   const [message, setMessage] = useState("");
   const [listening, setListening] = useState(false);
-  const [supported, setSupported] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [hasSR, setHasSR] = useState(false);
+  const [hasMR, setHasMR] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
-    const SR = getSpeechRecognition();
-    setSupported(!!SR);
+    setHasSR(!!getSpeechRecognition());
+    setHasMR(hasMediaRecorderSupport());
   }, []);
+
+  const micSupported = hasSR || hasMR;
+  const micBusy = listening || recording || transcribing;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,6 +55,7 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
     }
   };
 
+  // ---- Web Speech API (Chrome/Edge/Android) ----
   const startListening = () => {
     const SR = getSpeechRecognition();
     if (!SR) return;
@@ -71,7 +94,83 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
     setListening(false);
   };
 
-  const toggleMic = () => (listening ? stopListening() : startListening());
+  // ---- MediaRecorder + Whisper (Safari iOS / fallback) ----
+  const transcribeWithWhisper = async (blob: Blob, ext: string) => {
+    try {
+      setTranscribing(true);
+      const form = new FormData();
+      form.append("audio", blob, `recording.${ext}`);
+      const headers = await authHeaders();
+      const r = await fetch(`${FUNCTIONS_URL}/transcribe-audio`, {
+        method: "POST",
+        headers,
+        body: form,
+      });
+      const data = await r.json();
+      if (data?.text) {
+        setMessage(String(data.text));
+      } else if (data?.error) {
+        console.error("Whisper error", data.error);
+      }
+    } catch (e) {
+      console.error("Whisper transcription failed", e);
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const startWhisper = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const MR: any = (window as any).MediaRecorder;
+      const mimeType = MR.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MR.isTypeSupported("audio/mp4")
+        ? "audio/mp4"
+        : "audio/ogg";
+      const recorder: MediaRecorder = new MR(stream, { mimeType });
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: mimeType });
+        const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
+        await transcribeWithWhisper(blob, ext);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+      onMicStart?.();
+    } catch (e) {
+      console.error("MediaRecorder start failed", e);
+      setRecording(false);
+    }
+  };
+
+  const stopWhisper = () => {
+    try { mediaRecorderRef.current?.stop(); } catch { /* noop */ }
+    mediaRecorderRef.current = null;
+    setRecording(false);
+  };
+
+  const toggleMic = () => {
+    if (transcribing) return;
+    if (hasSR) {
+      listening ? stopListening() : startListening();
+    } else if (hasMR) {
+      recording ? stopWhisper() : startWhisper();
+    }
+  };
+
+  const placeholder = listening
+    ? "🎤 A ouvir..."
+    : recording
+    ? "🔴 A gravar... (toca para parar)"
+    : transcribing
+    ? "⏳ A processar..."
+    : "Digite a sua mensagem...";
 
   return (
     <form
@@ -81,27 +180,38 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
       <Input
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        placeholder={listening ? "🎤 A ouvir..." : "Digite sua mensagem..."}
-        disabled={disabled}
+        placeholder={placeholder}
+        disabled={disabled || transcribing}
         className="flex-1 rounded-full bg-chat-input border-border focus:ring-chat-primary focus:border-chat-primary"
       />
-      {supported && (
+      {micSupported && (
         <Button
           type="button"
           size="icon"
-          variant={listening ? "destructive" : "outline"}
+          variant={recording || listening ? "destructive" : "outline"}
           onClick={toggleMic}
-          disabled={disabled}
-          aria-label={listening ? "A ouvir..." : "Ditar mensagem por voz"}
-          className={`rounded-full ${listening ? "animate-pulse" : ""}`}
+          disabled={disabled || transcribing}
+          aria-label={
+            transcribing ? "A processar..."
+              : recording ? "A gravar... toca para parar"
+              : listening ? "A ouvir..."
+              : "Ditar mensagem por voz"
+          }
+          className={`rounded-full ${micBusy ? "animate-pulse" : ""}`}
         >
-          {listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+          {transcribing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : recording || listening ? (
+            <MicOff className="h-4 w-4" />
+          ) : (
+            <Mic className="h-4 w-4" />
+          )}
         </Button>
       )}
       <Button
         type="submit"
         size="icon"
-        disabled={!message.trim() || disabled}
+        disabled={!message.trim() || disabled || transcribing}
         className="rounded-full bg-chat-primary hover:bg-chat-primary/90 text-chat-primary-foreground shadow-chat"
       >
         <Send className="h-4 w-4" />
