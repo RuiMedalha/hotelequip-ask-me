@@ -7,10 +7,20 @@ async function safeJson(res: Response) {
   try { return t ? JSON.parse(t) : {}; } catch { return { raw: t }; }
 }
 
+function json(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  let action = "";
   try {
-    const { conversation_id, action, content } = await req.json();
+    const body = await req.json();
+    action = body.action;
+    const { conversation_id, content } = body;
     if (!conversation_id || !action) throw new Error("conversation_id and action required");
 
     const admin = adminClient();
@@ -92,8 +102,9 @@ serve(async (req) => {
 
     throw new Error(`unknown action: ${action}`);
   } catch (e: any) {
-    return new Response(JSON.stringify({ error: e.message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    if (action === "poll" && String(e?.message || e).includes("Chatwoot poll failed")) {
+      return json({ ok: true, fallback: true, reason: "poll_error", new_messages: [] });
+    }
+    return json({ error: e.message }, 500);
   }
 });
