@@ -11,7 +11,8 @@ import { supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY, isSupabaseConfigured } from
 
 type UiAction =
   | { type: "request_input"; input_type: "email" | "phone"; message: string }
-  | { type: "quick_replies"; message: string; options: { label: string; value: string }[] };
+  | { type: "quick_replies"; message: string; options: { label: string; value: string }[] }
+  | { type: "whatsapp_handoff"; link: string };
 
 interface Message {
   id: string;
