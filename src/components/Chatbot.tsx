@@ -321,6 +321,22 @@ export const Chatbot = () => {
     if (el) (el as HTMLElement).scrollTop = el.scrollHeight;
   }, [messages, isTyping, showIntentMenu]);
 
+  useEffect(() => {
+    if (!humanMode || chatwootLive || !conversationId || !isSupabaseConfigured) return;
+    let active = true;
+    const refresh = async () => {
+      const { data } = await supabase
+        .from("conversations")
+        .select("chatwoot_pubsub_token")
+        .eq("id", conversationId)
+        .maybeSingle();
+      if (active && (data as any)?.chatwoot_pubsub_token) setChatwootLive(true);
+    };
+    refresh();
+    const t = setInterval(refresh, 4000);
+    return () => { active = false; clearInterval(t); };
+  }, [humanMode, chatwootLive, conversationId]);
+
   // Polling no modo humano
   useEffect(() => {
     if (!humanMode || !chatwootLive || !conversationId) return;
