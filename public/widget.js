@@ -87,7 +87,7 @@
   panel.innerHTML =
     '<div class="he-head"><span class="he-title">HotelEquip Assistente</span>' +
     '<button class="he-close" aria-label="Fechar">×</button></div>' +
-    '<iframe class="he-frame" title="HotelEquip Assistente" allow="microphone; clipboard-write" src="about:blank"></iframe>';
+    '<iframe class="he-frame" title="HotelEquip Assistente" allow="microphone; autoplay; clipboard-write" src="about:blank"></iframe>';
   root.appendChild(panel);
 
   var iframe = panel.querySelector(".he-frame");
