@@ -4,10 +4,11 @@ import { Button } from "@/components/ui/button";
 interface ChatHeaderProps {
   ttsSupported?: boolean;
   ttsEnabled?: boolean;
+  speaking?: boolean;
   onToggleTts?: () => void;
 }
 
-export const ChatHeader = ({ ttsSupported, ttsEnabled, onToggleTts }: ChatHeaderProps) => {
+export const ChatHeader = ({ ttsSupported, ttsEnabled, speaking, onToggleTts }: ChatHeaderProps) => {
   return (
     <div className="flex items-center gap-3 p-4 bg-gradient-primary text-chat-primary-foreground shadow-chat">
       <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
@@ -27,7 +28,7 @@ export const ChatHeader = ({ ttsSupported, ttsEnabled, onToggleTts }: ChatHeader
           size="icon"
           onClick={onToggleTts}
           aria-label={ttsEnabled ? "Desactivar voz do assistente" : "Activar voz do assistente"}
-          className="text-chat-primary-foreground hover:bg-white/20"
+          className={`text-chat-primary-foreground hover:bg-white/20 ${speaking ? "animate-pulse ring-2 ring-white/60" : ""}`}
         >
           {ttsEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
         </Button>
