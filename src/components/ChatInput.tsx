@@ -29,7 +29,7 @@ async function authHeaders(): Promise<Record<string, string>> {
   };
 }
 
-export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProps) => {
+export const ChatInput = ({ onSendMessage, onMicStart, disabled, pendingInput }: ChatInputProps) => {
   const [message, setMessage] = useState("");
   const [listening, setListening] = useState(false);
   const [recording, setRecording] = useState(false);
