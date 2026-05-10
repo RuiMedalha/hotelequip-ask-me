@@ -52,6 +52,12 @@ serve(async (req) => {
     }
 
     if (action === "poll") {
+      // If we don't have a pubsub_token, the conversation was created via admin API and the public endpoint will 404.
+      if (!conv.chatwoot_pubsub_token) {
+        return new Response(JSON.stringify({ ok: true, fallback: true, reason: "no_pubsub_token", new_messages: [] }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       const r = await fetch(`${base}/messages`, { headers: { "Content-Type": "application/json" } });
       const data = await safeJson(r);
       if (!r.ok) {
