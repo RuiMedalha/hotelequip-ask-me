@@ -141,6 +141,18 @@ export const Chatbot = () => {
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
+  const ttsUnlockedRef = useRef(false);
+  const isIOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  const unlockTts = () => {
+    if (ttsUnlockedRef.current || !ttsSupported) return;
+    try {
+      const u = new SpeechSynthesisUtterance(" ");
+      u.volume = 0;
+      u.onend = () => { ttsUnlockedRef.current = true; };
+      window.speechSynthesis.speak(u);
+    } catch { /* noop */ }
+  };
 
   const ttsSupported = typeof window !== "undefined" && "speechSynthesis" in window;
   const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => {
