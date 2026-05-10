@@ -202,7 +202,9 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
     }
   };
 
-  const placeholder = listening
+  const placeholder = disabled
+    ? "👆 Por favor usa o campo acima"
+    : listening
     ? "🎤 A ouvir..."
     : recording
     ? "🔴 A gravar... (toca para parar)"
