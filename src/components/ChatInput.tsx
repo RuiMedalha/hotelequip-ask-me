@@ -38,6 +38,7 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
   const recognitionRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const whisperTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setHasSR(!!getSpeechRecognition());
@@ -48,6 +49,7 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
     return () => {
       try { recognitionRef.current?.stop(); } catch { /* noop */ }
       try { mediaRecorderRef.current?.stop(); } catch { /* noop */ }
+      if (whisperTimeoutRef.current) clearTimeout(whisperTimeoutRef.current);
     };
   }, []);
 
@@ -56,6 +58,10 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (whisperTimeoutRef.current) {
+      clearTimeout(whisperTimeoutRef.current);
+      whisperTimeoutRef.current = null;
+    }
     if (message.trim() && !disabled) {
       onSendMessage(message.trim());
       setMessage("");
@@ -128,11 +134,12 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
       if (data?.text) {
         const text = String(data.text).trim();
         setMessage(text);
-        setTimeout(() => {
+        whisperTimeoutRef.current = setTimeout(() => {
           if (text) {
             onSendMessage(text);
             setMessage("");
           }
+          whisperTimeoutRef.current = null;
         }, 500);
       } else if (data?.error) {
         console.error("Whisper error", data.error);
