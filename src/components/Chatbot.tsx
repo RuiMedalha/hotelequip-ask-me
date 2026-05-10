@@ -205,6 +205,7 @@ export const Chatbot = () => {
   // Replace current speech (used for non-stream full reply)
   const speak = (text: string) => {
     if (!ttsSupported || !ttsEnabled) return;
+    if (isIOS && !ttsUnlockedRef.current) return;
     const clean = cleanForSpeech(text);
     if (!clean) return;
     try {
@@ -216,6 +217,7 @@ export const Chatbot = () => {
   // Queue speech (used for streaming, sentence-by-sentence)
   const enqueueSpeech = (text: string) => {
     if (!ttsSupported || !ttsEnabled) return;
+    if (isIOS && !ttsUnlockedRef.current) return;
     const clean = cleanForSpeech(text);
     if (!clean) return;
     try {
