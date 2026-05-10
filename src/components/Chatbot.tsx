@@ -515,6 +515,7 @@ export const Chatbot = () => {
       <ChatHeader
         ttsSupported={ttsSupported}
         ttsEnabled={ttsEnabled}
+        speaking={speaking}
         onToggleTts={() => setTtsEnabled(v => !v)}
       />
       {humanMode && (
