@@ -44,6 +44,13 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
     setHasMR(hasMediaRecorderSupport());
   }, []);
 
+  useEffect(() => {
+    return () => {
+      try { recognitionRef.current?.stop(); } catch { /* noop */ }
+      try { mediaRecorderRef.current?.stop(); } catch { /* noop */ }
+    };
+  }, []);
+
   const micSupported = hasSR || hasMR;
   const micBusy = listening || recording || transcribing;
 
@@ -130,10 +137,16 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
         : "audio/ogg";
       const recorder: MediaRecorder = new MR(stream, { mimeType });
       chunksRef.current = [];
+      const timeoutId = setTimeout(() => {
+        if (mediaRecorderRef.current?.state === "recording") {
+          stopWhisper();
+        }
+      }, 60000);
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       recorder.onstop = async () => {
+        clearTimeout(timeoutId);
         stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunksRef.current, { type: mimeType });
         const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
