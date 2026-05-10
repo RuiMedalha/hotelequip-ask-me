@@ -8,6 +8,7 @@ interface ChatInputProps {
   onSendMessage: (message: string) => void;
   onMicStart?: () => void;
   disabled?: boolean;
+  pendingInput?: boolean;
 }
 
 function getSpeechRecognition(): any {
@@ -28,7 +29,7 @@ async function authHeaders(): Promise<Record<string, string>> {
   };
 }
 
-export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProps) => {
+export const ChatInput = ({ onSendMessage, onMicStart, disabled, pendingInput }: ChatInputProps) => {
   const [message, setMessage] = useState("");
   const [listening, setListening] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -202,7 +203,9 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
     }
   };
 
-  const placeholder = listening
+  const placeholder = pendingInput
+    ? "👆 Por favor usa o campo acima"
+    : listening
     ? "🎤 A ouvir..."
     : recording
     ? "🔴 A gravar... (toca para parar)"

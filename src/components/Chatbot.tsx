@@ -529,6 +529,10 @@ export const Chatbot = () => {
     await sendToBackend(value);
   };
 
+  const hasPendingInput = messages.some(
+    m => m.ui && !m.consumed && m.ui.type === "request_input"
+  );
+
   return (
     <div className="flex flex-col h-full max-w-full bg-background">
       <ChatHeader
@@ -592,7 +596,12 @@ export const Chatbot = () => {
           {isTyping && <TypingIndicator />}
         </div>
       </ScrollArea>
-      <ChatInput onSendMessage={handleSendMessage} onMicStart={handleMicStart} disabled={isTyping} />
+      <ChatInput
+        onSendMessage={handleSendMessage}
+        onMicStart={handleMicStart}
+        disabled={isTyping || humanMode || hasPendingInput}
+        pendingInput={hasPendingInput}
+      />
     </div>
   );
 };
