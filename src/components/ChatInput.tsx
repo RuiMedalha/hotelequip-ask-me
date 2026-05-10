@@ -73,15 +73,26 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
       rec.interimResults = true;
       rec.continuous = false;
       rec.maxAlternatives = 1;
-      let finalText = "";
       rec.onresult = (event: any) => {
         let interim = "";
+        let final = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const t = event.results[i][0].transcript;
-          if (event.results[i].isFinal) finalText += t;
+          if (event.results[i].isFinal) final += t;
           else interim += t;
         }
-        setMessage((prev) => (finalText || interim ? (finalText || interim) : prev));
+        const text = final || interim;
+        if (text) setMessage(text);
+        if (final) {
+          try { recognitionRef.current?.stop(); } catch { /* noop */ }
+          setTimeout(() => {
+            const trimmed = final.trim();
+            if (trimmed) {
+              onSendMessage(trimmed);
+              setMessage("");
+            }
+          }, 500);
+        }
       };
       rec.onerror = () => setListening(false);
       rec.onend = () => {
@@ -115,7 +126,14 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
       });
       const data = await r.json();
       if (data?.text) {
-        setMessage(String(data.text));
+        const text = String(data.text).trim();
+        setMessage(text);
+        setTimeout(() => {
+          if (text) {
+            onSendMessage(text);
+            setMessage("");
+          }
+        }, 500);
       } else if (data?.error) {
         console.error("Whisper error", data.error);
       }
