@@ -23,6 +23,36 @@ interface Message {
   consumed?: boolean;
 }
 
+interface StoredMessageRow {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+interface ConversationRow {
+  mode?: string | null;
+  chatwoot_pubsub_token?: string | null;
+}
+
+interface ChatwootMessage {
+  id: string | number;
+  content: string;
+  created_at: string;
+}
+
+interface ChatPayload {
+  conversation_id?: string;
+  reply?: string | null;
+  ui_actions?: UiAction[];
+  channel?: string;
+  whatsapp_link?: string;
+  mode?: string | null;
+  token?: string;
+  done?: boolean;
+  error?: string;
+}
+
 const INTENT_OPTIONS: { label: string; value: string }[] = [
   { label: "🛒 Produtos & Preços", value: "produtos" },
   { label: "🔧 Questões Técnicas", value: "tecnico" },
