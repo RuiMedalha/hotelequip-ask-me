@@ -418,7 +418,13 @@ export const Chatbot = () => {
       const newHistory = [...history, { role: "user" as const, content: text }];
       setHistory(newHistory);
       const intent = intentOverride ?? pendingIntent;
-      const body: any = {
+      const body: {
+        messages: { role: "user" | "assistant"; content: string }[];
+        visitor_id: string;
+        conversation_id: string | null;
+        stream: boolean;
+        intent?: string;
+      } = {
         messages: newHistory,
         visitor_id: getVisitorId(),
         conversation_id: conversationId,
@@ -453,7 +459,7 @@ export const Chatbot = () => {
         let buffer = "";
         let fullText = "";
         let spokenUpTo = 0; // index up to which we've already spoken
-        let finalPayload: any = null;
+        let finalPayload: ChatPayload | null = null;
 
         const flushSentences = (final = false) => {
           if (!ttsEnabled || !ttsSupported) return;
@@ -487,7 +493,7 @@ export const Chatbot = () => {
             const payload = line.slice(5).trim();
             if (!payload || payload === "[DONE]") continue;
             try {
-              const obj = JSON.parse(payload);
+              const obj = JSON.parse(payload) as ChatPayload;
               if (obj.token) {
                 fullText += obj.token;
                 setMessages(p => p.map(m => m.id === botMsgId ? { ...m, text: fullText } : m));
