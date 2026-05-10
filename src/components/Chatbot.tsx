@@ -157,6 +157,7 @@ export const Chatbot = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [welcome, setWelcome] = useState("Olá! 👋 Sou o assistente da HotelEquip. Como posso ajudar?");
   const [humanMode, setHumanMode] = useState(false);
+  const [chatwootLive, setChatwootLive] = useState(false);
   const [showIntentMenu, setShowIntentMenu] = useState(false);
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -301,8 +302,11 @@ export const Chatbot = () => {
           setShowIntentMenu(true);
         }
         const { data: conv } = await supabase
-          .from("conversations").select("mode").eq("id", conversationId).maybeSingle();
-        if (!cancelled && (conv as any)?.mode === "human") setHumanMode(true);
+          .from("conversations").select("mode, chatwoot_pubsub_token").eq("id", conversationId).maybeSingle();
+        if (!cancelled && (conv as any)?.mode === "human") {
+          setHumanMode(true);
+          setChatwootLive(!!(conv as any)?.chatwoot_pubsub_token);
+        }
       } else {
         setMessages([{ id: "welcome", text: welcome, isUser: false, timestamp: new Date() }]);
         setShowIntentMenu(true);
