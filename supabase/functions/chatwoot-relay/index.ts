@@ -54,7 +54,16 @@ serve(async (req) => {
     if (action === "poll") {
       const r = await fetch(`${base}/messages`, { headers: { "Content-Type": "application/json" } });
       const data = await safeJson(r);
-      if (!r.ok) throw new Error(`Chatwoot poll failed (${r.status}): ${JSON.stringify(data).slice(0, 300)}`);
+      if (!r.ok) {
+        // Conversation likely created via private API (no public pubsub link) — degrade gracefully
+        console.warn(`Chatwoot poll ${r.status}:`, JSON.stringify(data).slice(0, 200));
+        return new Response(JSON.stringify({
+          ok: false,
+          fallback: true,
+          status: r.status,
+          new_messages: [],
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
       const messages: any[] = Array.isArray(data) ? data : (data.payload || data.data || []);
       // Chatwoot message_type: 0 = incoming (visitor), 1 = outgoing (agent), 2 = activity, 3 = template
       const lastSeen = Number(conv.chatwoot_last_message_id || 0);
