@@ -5,6 +5,7 @@ import { Send, Mic, MicOff } from "lucide-react";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
+  onMicStart?: () => void;
   disabled?: boolean;
 }
 
@@ -13,7 +14,7 @@ function getSpeechRecognition(): any {
   return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
 }
 
-export const ChatInput = ({ onSendMessage, disabled }: ChatInputProps) => {
+export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProps) => {
   const [message, setMessage] = useState("");
   const [listening, setListening] = useState(false);
   const [supported, setSupported] = useState(false);
