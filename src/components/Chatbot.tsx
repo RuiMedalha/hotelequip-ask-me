@@ -147,12 +147,14 @@ export const Chatbot = () => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem("he_tts_enabled") === "1";
   });
+  const [speaking, setSpeaking] = useState(false);
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem("he_tts_enabled", ttsEnabled ? "1" : "0");
     }
     if (!ttsEnabled && ttsSupported) {
       try { window.speechSynthesis.cancel(); } catch { /* noop */ }
+      setSpeaking(false);
     }
   }, [ttsEnabled, ttsSupported]);
 
@@ -173,27 +175,62 @@ export const Chatbot = () => {
      .replace(/:[a-z_]+:/g, "")
      .trim();
 
+  const buildUtterance = (text: string) => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "pt-PT";
+    const v = pickPtVoice();
+    if (v) u.voice = v;
+    u.onstart = () => setSpeaking(true);
+    u.onend = () => {
+      if (!window.speechSynthesis.pending && !window.speechSynthesis.speaking) {
+        setSpeaking(false);
+      }
+    };
+    u.onerror = () => setSpeaking(false);
+    return u;
+  };
+
+  // Replace current speech (used for non-stream full reply)
   const speak = (text: string) => {
     if (!ttsSupported || !ttsEnabled) return;
     const clean = cleanForSpeech(text);
     if (!clean) return;
     try {
       window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(clean);
-      u.lang = "pt-PT";
-      const v = pickPtVoice();
-      if (v) u.voice = v;
-      window.speechSynthesis.speak(u);
+      window.speechSynthesis.speak(buildUtterance(clean));
     } catch { /* noop */ }
   };
 
-  // Pre-load voices (some browsers populate async)
+  // Queue speech (used for streaming, sentence-by-sentence)
+  const enqueueSpeech = (text: string) => {
+    if (!ttsSupported || !ttsEnabled) return;
+    const clean = cleanForSpeech(text);
+    if (!clean) return;
+    try {
+      window.speechSynthesis.speak(buildUtterance(clean));
+    } catch { /* noop */ }
+  };
+
+  // Barge-in: stop TTS the moment the user starts dictating
+  const handleMicStart = () => {
+    if (ttsSupported) {
+      try { window.speechSynthesis.cancel(); } catch { /* noop */ }
+      setSpeaking(false);
+    }
+  };
+
+  // Pre-load voices + cleanup TTS on unmount
   useEffect(() => {
     if (!ttsSupported) return;
     const load = () => window.speechSynthesis.getVoices();
     load();
     window.speechSynthesis.onvoiceschanged = load;
-    return () => { try { window.speechSynthesis.onvoiceschanged = null as any; } catch { /* noop */ } };
+    return () => {
+      try {
+        window.speechSynthesis.onvoiceschanged = null as any;
+        window.speechSynthesis.cancel();
+      } catch { /* noop */ }
+    };
   }, [ttsSupported]);
 
   useEffect(() => {
