@@ -605,6 +605,9 @@ export const Chatbot = () => {
                   />
                 );
               }
+              if (m.ui.type === "whatsapp_handoff") {
+                return <WhatsAppHandoffCard key={m.id} link={m.ui.link} />;
+              }
             }
             if (!m.text) return null;
             return <ChatMessage key={m.id} message={m.text} isUser={m.isUser} timestamp={m.timestamp} />;
