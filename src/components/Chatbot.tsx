@@ -141,6 +141,18 @@ export const Chatbot = () => {
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
+  const ttsUnlockedRef = useRef(false);
+  const isIOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  const unlockTts = () => {
+    if (ttsUnlockedRef.current || !ttsSupported) return;
+    try {
+      const u = new SpeechSynthesisUtterance(" ");
+      u.volume = 0;
+      u.onend = () => { ttsUnlockedRef.current = true; };
+      window.speechSynthesis.speak(u);
+    } catch { /* noop */ }
+  };
 
   const ttsSupported = typeof window !== "undefined" && "speechSynthesis" in window;
   const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => {
@@ -193,6 +205,7 @@ export const Chatbot = () => {
   // Replace current speech (used for non-stream full reply)
   const speak = (text: string) => {
     if (!ttsSupported || !ttsEnabled) return;
+    if (isIOS && !ttsUnlockedRef.current) return;
     const clean = cleanForSpeech(text);
     if (!clean) return;
     try {
@@ -204,6 +217,7 @@ export const Chatbot = () => {
   // Queue speech (used for streaming, sentence-by-sentence)
   const enqueueSpeech = (text: string) => {
     if (!ttsSupported || !ttsEnabled) return;
+    if (isIOS && !ttsUnlockedRef.current) return;
     const clean = cleanForSpeech(text);
     if (!clean) return;
     try {
@@ -479,12 +493,14 @@ export const Chatbot = () => {
   };
 
   const handleSendMessage = async (text: string) => {
+    unlockTts();
     setShowIntentMenu(false);
     pushUserMessage(text);
     await sendToBackend(text);
   };
 
   const handleIntentPick = async (label: string, value: string) => {
+    unlockTts();
     setShowIntentMenu(false);
     setPendingIntent(value);
     if (value === "outro") {
@@ -500,12 +516,14 @@ export const Chatbot = () => {
   };
 
   const handleUiSubmit = async (id: string, value: string) => {
+    unlockTts();
     consumeUi(id);
     pushUserMessage(value);
     await sendToBackend(value);
   };
 
   const handleQuickReply = async (id: string, label: string, value: string) => {
+    unlockTts();
     consumeUi(id);
     pushUserMessage(label);
     await sendToBackend(value);
