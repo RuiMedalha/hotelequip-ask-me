@@ -362,7 +362,7 @@ export const Chatbot = () => {
         .select("chatwoot_pubsub_token")
         .eq("id", conversationId)
         .maybeSingle();
-      if (active && (data as any)?.chatwoot_pubsub_token) setChatwootLive(true);
+      if (active && (data as ConversationRow | null)?.chatwoot_pubsub_token) setChatwootLive(true);
     };
     refresh();
     const t = setInterval(refresh, 4000);
@@ -380,13 +380,13 @@ export const Chatbot = () => {
           headers: await authHeaders(),
           body: JSON.stringify({ conversation_id: conversationId, action: "poll" }),
         });
-        const data = await r.json().catch(() => ({}));
+        const data = await r.json().catch(() => ({})) as { new_messages?: ChatwootMessage[] };
         if (!r.ok) return;
         if (!active || !data?.new_messages?.length) return;
         setMessages(prev => {
           const add = data.new_messages
-            .filter((m: any) => !seenIdsRef.current.has(`cw-${m.id}`))
-            .map((m: any) => {
+            .filter((m) => !seenIdsRef.current.has(`cw-${m.id}`))
+            .map((m) => {
               seenIdsRef.current.add(`cw-${m.id}`);
               return { id: `cw-${m.id}`, text: m.content, isUser: false, timestamp: new Date(m.created_at) };
             });
