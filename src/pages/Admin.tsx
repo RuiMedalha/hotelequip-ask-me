@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { WebhooksTab } from "@/components/admin/WebhooksTab";
 
 type Settings = Record<string, any>;
 
@@ -169,6 +170,7 @@ export default function Admin() {
           <TabsTrigger value="kb">Knowledge Base</TabsTrigger>
           <TabsTrigger value="woo">WooCommerce & Meili</TabsTrigger>
           <TabsTrigger value="handoff">Handoff</TabsTrigger>
+          <TabsTrigger value="automations">Automações</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ai">
