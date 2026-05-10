@@ -350,6 +350,17 @@ export default function Admin() {
                 </select>
               </div>
             </div>
+            <div>
+              <Label>Número interno da equipa (notificações)</Label>
+              <Input
+                value={settings.whatsapp_team_number || ""}
+                onChange={e => set("whatsapp_team_number", e.target.value)}
+                placeholder="+351916542271"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Número para notificações internas quando há handoff. Diferente do número público da HotelEquip.
+              </p>
+            </div>
             {settings.whatsapp_mode === "meta" && (
               <>
                 <div><Label>Phone Number ID</Label><Input value={settings.meta_wa_phone_number_id || ""} onChange={e => set("meta_wa_phone_number_id", e.target.value)} placeholder="ex: 123456789012345" /></div>
