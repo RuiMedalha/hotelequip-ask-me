@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { WebhooksTab } from "@/components/admin/WebhooksTab";
 
 type Settings = Record<string, any>;
 
@@ -169,6 +170,7 @@ export default function Admin() {
           <TabsTrigger value="kb">Knowledge Base</TabsTrigger>
           <TabsTrigger value="woo">WooCommerce & Meili</TabsTrigger>
           <TabsTrigger value="handoff">Handoff</TabsTrigger>
+          <TabsTrigger value="automations">Automações</TabsTrigger>
         </TabsList>
 
         <TabsContent value="ai">
@@ -350,6 +352,17 @@ export default function Admin() {
                 </select>
               </div>
             </div>
+            <div>
+              <Label>Número interno da equipa (notificações)</Label>
+              <Input
+                value={settings.whatsapp_team_number || ""}
+                onChange={e => set("whatsapp_team_number", e.target.value)}
+                placeholder="+351916542271"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Número para notificações internas quando há handoff. Diferente do número público da HotelEquip.
+              </p>
+            </div>
             {settings.whatsapp_mode === "meta" && (
               <>
                 <div><Label>Phone Number ID</Label><Input value={settings.meta_wa_phone_number_id || ""} onChange={e => set("meta_wa_phone_number_id", e.target.value)} placeholder="ex: 123456789012345" /></div>
@@ -379,6 +392,12 @@ export default function Admin() {
               </>
             )}
             <Button onClick={saveSettings} disabled={busy}>Guardar</Button>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="automations">
+          <Card className="p-6">
+            <WebhooksTab />
           </Card>
         </TabsContent>
       </Tabs>

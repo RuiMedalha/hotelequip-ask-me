@@ -480,12 +480,14 @@ export const Chatbot = () => {
         // Fallback: classic JSON response
         const data = await r.json();
         if (data.conversation_id) setConversationId(data.conversation_id);
-        const reply = data.reply || "(sem resposta)";
-        setHistory(h => [...h, { role: "assistant", content: reply }]);
-
-        const newMsgs: Message[] = [
-          { id: botMsgId, text: reply, isUser: false, timestamp: new Date() },
-        ];
+        const reply = data.reply as string | null;
+        if (reply) {
+          setHistory(h => [...h, { role: "assistant", content: reply }]);
+        }
+        const newMsgs: Message[] = [];
+        if (reply) {
+          newMsgs.push({ id: botMsgId, text: reply, isUser: false, timestamp: new Date() });
+        }
         const actions: UiAction[] = Array.isArray(data.ui_actions) ? data.ui_actions : [];
         actions.forEach((ui, i) => {
           newMsgs.push({
@@ -506,7 +508,7 @@ export const Chatbot = () => {
           });
         }
         setMessages(p => [...p, ...newMsgs]);
-        speak(reply);
+        if (reply) speak(reply);
         if (data.mode === "human") setHumanMode(true);
       }
     } catch (e: any) {
