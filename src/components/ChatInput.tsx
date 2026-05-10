@@ -36,6 +36,7 @@ export const ChatInput = ({ onSendMessage, onMicStart, disabled }: ChatInputProp
   const startListening = () => {
     const SR = getSpeechRecognition();
     if (!SR) return;
+    onMicStart?.();
     try {
       const rec = new SR();
       rec.lang = "pt-PT";
