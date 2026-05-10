@@ -8,6 +8,7 @@ interface ChatInputProps {
   onSendMessage: (message: string) => void;
   onMicStart?: () => void;
   disabled?: boolean;
+  pendingInput?: boolean;
 }
 
 function getSpeechRecognition(): any {
