@@ -15,7 +15,9 @@ import {
   saveUserMessage,
   saveAiMessage,
   requestHumanHandoff,
+  syncCustomerDetailsFromUserMessage,
 } from "@/services/directusChatBridge";
+import { isExplicitHumanRequest } from "@/lib/chatCustomerDetails";
 import { uuid } from "@/lib/uuid";
 
 type UiAction =
@@ -701,21 +703,7 @@ export const Chatbot = () => {
   };
 
   const persistOutboundUserBubble = async (displayedBubble: string) => {
-    const trimmed = displayedBubble.trim();
-    if (!trimmed) return;
-    if (!isDirectusConfigured) return;
-    try {
-      const conversationIdForDirectus =
-        directusConversationIdRef.current ?? await ensureDirectusConversationReady();
-      if (!conversationIdForDirectus) return;
-
-      const mid = await saveUserMessage(conversationIdForDirectus, trimmed);
-      if (mid) seenDirectusMessageIdsRef.current.add(`d-${mid}`);
-      logDirectusDev("[Directus] user message saved");
-    }
-    catch (e) {
-      warnDirectusDev("[Directus] user message save failed", e);
-    }
+    await persistDirectusUserTurn(displayedBubble);
   };
 
   const persistInboundAssistantBubble = async (assistantPlain: string) => {
@@ -749,6 +737,57 @@ export const Chatbot = () => {
         warnDirectusDev("[Directus] handoff request failed", e);
       }
     })();
+  };
+
+  const activateExplicitHumanHandoff = (channelHint?: string) => {
+    setHumanMode(true);
+    directusHumanLaneRef.current = true;
+    setDirectusHumanLane(true);
+    announceHandoffToDirectus(channelHint);
+  };
+
+  const applyBackendHumanHandoffIfExplicit = (userText: string, payload: ChatPayload | null) => {
+    if (payload?.mode !== "human") return;
+    if (!isExplicitHumanRequest(userText)) {
+      logDirectusDev("[Directus] ignored backend mode=human (no explicit user request)", userText);
+      return;
+    }
+    activateExplicitHumanHandoff(
+      typeof payload.channel === "string" ? payload.channel : undefined,
+    );
+  };
+
+  const syncDirectusCustomerDetails = async (conversationId: string, text: string) => {
+    try {
+      await syncCustomerDetailsFromUserMessage(conversationId, text);
+    }
+    catch (e) {
+      warnDirectusDev("[Directus] customer details sync failed", e);
+    }
+  };
+
+  const persistDirectusUserTurn = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || !isDirectusConfigured) return;
+
+    try {
+      const directusId =
+        directusConversationIdRef.current ?? await ensureDirectusConversationReady();
+      if (!directusId) return;
+
+      const mid = await saveUserMessage(directusId, trimmed);
+      if (mid) seenDirectusMessageIdsRef.current.add(`d-${mid}`);
+      logDirectusDev("[Directus] user message saved");
+
+      await syncDirectusCustomerDetails(directusId, trimmed);
+
+      if (isExplicitHumanRequest(trimmed)) {
+        activateExplicitHumanHandoff();
+      }
+    }
+    catch (e) {
+      warnDirectusDev("[Directus] user message save failed", e);
+    }
   };
 
   const sendToBackend = async (text: string, intentOverride?: string) => {
@@ -881,12 +920,7 @@ export const Chatbot = () => {
             })),
           ]);
         }
-        if (finalPayload?.mode === "human") {
-          setHumanMode(true);
-          directusHumanLaneRef.current = true;
-          setDirectusHumanLane(true);
-          announceHandoffToDirectus(finalPayload.channel ?? undefined);
-        }
+        applyBackendHumanHandoffIfExplicit(text, finalPayload);
         if (finalPayload?.channel === "whatsapp" && finalPayload?.whatsapp_link) {
           setMessages(p => [...p, {
             id: `${baseId}-wa`,
@@ -930,12 +964,7 @@ export const Chatbot = () => {
         }
         setMessages(p => [...p, ...newMsgs]);
         if (reply) speak(reply);
-        if (data.mode === "human") {
-          setHumanMode(true);
-          directusHumanLaneRef.current = true;
-          setDirectusHumanLane(true);
-          announceHandoffToDirectus(typeof data.channel === "string" ? data.channel : undefined);
-        }
+        applyBackendHumanHandoffIfExplicit(text, data as ChatPayload);
       }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
@@ -964,18 +993,7 @@ export const Chatbot = () => {
     setShowIntentMenu(false);
     pushUserMessage(text);
 
-    if (isDirectusConfigured) {
-      try {
-        const directusId = await ensureDirectusConversation(getVisitorId());
-        bindDirectusConversationId(directusId);
-        const mid = await saveUserMessage(directusId, text.trim());
-        if (mid) seenDirectusMessageIdsRef.current.add(`d-${mid}`);
-        logDirectusDev("[Directus] user message saved");
-      }
-      catch (e) {
-        warnDirectusDev("[Directus] user message save failed", e);
-      }
-    }
+    await persistDirectusUserTurn(text);
 
     await sendToBackend(text);
   };

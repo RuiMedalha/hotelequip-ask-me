@@ -6,6 +6,7 @@ import {
 } from "@/integrations/directus/conversations";
 import { createMessage } from "@/integrations/directus/messages";
 import { isDirectusConfigured } from "@/integrations/directus/client";
+import { extractPhone, looksLikePersonName } from "@/lib/chatCustomerDetails";
 import type { DirectusConversationPayload, DirectusMessagePayload } from "@/types/directus";
 
 function logDirectusDev(...args: unknown[]) {
@@ -84,6 +85,45 @@ export async function ensureDirectusConversation(visitorId: string): Promise<str
 
   const created = await createConversation(payload);
   return coerceId(created.data, "ensureDirectusConversation(create)");
+}
+
+export async function updateDirectusConversation(
+  conversationId: string,
+  patch: DirectusConversationPayload,
+) {
+  requireDirectusConfigured();
+  await updateConversation(conversationId, patch);
+}
+
+const PLACEHOLDER_CUSTOMER_NAME = "Visitante do site";
+
+function shouldReplaceCustomerName(current: string | null | undefined) {
+  const c = (current ?? "").trim();
+  return !c || c === PLACEHOLDER_CUSTOMER_NAME;
+}
+
+/**
+ * Actualiza customer_name / phone na conversa quando o utilizador os fornece no chat.
+ */
+export async function syncCustomerDetailsFromUserMessage(conversationId: string, text: string) {
+  requireDirectusConfigured();
+  const patch: DirectusConversationPayload = {};
+  const phone = extractPhone(text);
+  if (phone) patch.phone = phone;
+
+  if (looksLikePersonName(text)) {
+    const conv = await getConversation(conversationId);
+    const currentName = typeof conv?.customer_name === "string" ? conv.customer_name : "";
+    if (shouldReplaceCustomerName(currentName)) {
+      patch.customer_name = text.trim();
+    }
+  }
+
+  if (Object.keys(patch).length === 0) return;
+
+  logDirectusDev("[Directus] updating conversation customer details", patch);
+  await updateDirectusConversation(conversationId, patch);
+  logDirectusDev("[Directus] conversation customer details updated");
 }
 
 export async function saveUserMessage(

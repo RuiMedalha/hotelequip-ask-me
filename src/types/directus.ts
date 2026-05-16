@@ -5,6 +5,7 @@
 export interface DirectusConversationPayload {
   visitor_id?: string;
   customer_name?: string;
+  phone?: string;
   status?: string;
   mode?: string;
   channel?: string;
