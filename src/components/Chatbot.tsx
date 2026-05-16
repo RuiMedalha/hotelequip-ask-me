@@ -8,6 +8,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY, isSupabaseConfigured } from "@/integrations/supabase/client";
+import { isDirectusConfigured } from "@/integrations/directus/client";
+import { getConversation, getConversationMessages } from "@/integrations/directus/conversations";
+import {
+  ensureDirectusConversation,
+  saveUserMessage,
+  saveAiMessage,
+  requestHumanHandoff,
+} from "@/services/directusChatBridge";
 
 type UiAction =
   | { type: "request_input"; input_type: "email" | "phone"; message: string }
@@ -62,6 +70,53 @@ const INTENT_OPTIONS: { label: string; value: string }[] = [
 ];
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeChatFingerprint(text: string) {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function fingerprintSetFromRenderableAssistantBubbles(messages: Message[]) {
+  const s = new Set<string>();
+  for (const m of messages) {
+    if (m.isUser || m.ui || !String(m.text || "").trim()) continue;
+    s.add(normalizeChatFingerprint(m.text));
+  }
+  return s;
+}
+
+function resolveDirectusConversationLane(
+  conv: Record<string, unknown> | null,
+): "human" | "bot" | "unknown" {
+  if (!conv) return "unknown";
+  const statusRaw = typeof conv.status === "string" ? conv.status.toLowerCase().trim() : "";
+  if (statusRaw === "human_active") return "human";
+  if (statusRaw === "ai_active") return "bot";
+  const modeRaw = typeof conv.mode === "string" ? conv.mode.toLowerCase().trim() : "";
+  if (modeRaw === "human") return "human";
+  if (modeRaw === "bot") return "bot";
+  return "unknown";
+}
+
+function directusInboundFromAgentPerspective(row: Record<string, unknown>) {
+  const role = typeof row.role === "string" ? row.role.toLowerCase().trim() : "";
+  if (role === "user" || role === "visitor" || role === "customer") return false;
+  return true;
+}
+
+function directusPlainText(row: Record<string, unknown>) {
+  const raw = row.content ?? row.message ?? row.body ?? row.text;
+  return typeof raw === "string" ? raw : "";
+}
+
+function parseDirectusInstant(row: Record<string, unknown>) {
+  const raw = row.date_created ?? row.created_on ?? row.created_at ?? row.date_updated ?? row.updated_at;
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (s) {
+    const t = Date.parse(s);
+    if (!Number.isNaN(t)) return new Date(t);
+  }
+  return new Date();
+}
 
 function getVisitorId() {
   let v = localStorage.getItem("he_visitor_id");
@@ -184,6 +239,10 @@ export const Chatbot = () => {
   const [conversationId, setConversationId] = useState<string | null>(
     () => localStorage.getItem("he_conversation_id")
   );
+  const [directusConversationId, setDirectusConversationId] = useState<string | null>(() =>
+    (typeof localStorage !== "undefined" ? localStorage.getItem("he_directus_conversation_id") : null),
+  );
+  const [directusHumanLane, setDirectusHumanLane] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [welcome, setWelcome] = useState("Olá! 👋 Sou o assistente da HotelEquip. Como posso ajudar?");
   const [humanMode, setHumanMode] = useState(false);
@@ -192,6 +251,9 @@ export const Chatbot = () => {
   const [pendingIntent, setPendingIntent] = useState<string | null>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
+  const seenDirectusMessageIdsRef = useRef<Set<string>>(new Set());
+  const directusConversationIdRef = useRef<string | null>(directusConversationId);
+  const directusHumanLaneRef = useRef(false);
   const ttsUnlockedRef = useRef(false);
   const isIOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -303,6 +365,103 @@ export const Chatbot = () => {
   }, [conversationId]);
 
   useEffect(() => {
+    directusConversationIdRef.current = directusConversationId;
+  }, [directusConversationId]);
+
+  useEffect(() => {
+    directusHumanLaneRef.current = directusHumanLane;
+  }, [directusHumanLane]);
+
+  useEffect(() => {
+    if (!isDirectusConfigured) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const id = await ensureDirectusConversation(getVisitorId());
+        if (cancelled) return;
+        setDirectusConversationId(id);
+        localStorage.setItem("he_directus_conversation_id", id);
+        directusConversationIdRef.current = id;
+      }
+      catch (e) {
+        console.warn("[directus] garantir conversa falhou", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isDirectusConfigured || !directusConversationId) return;
+    let active = true;
+
+    const tick = async () => {
+      try {
+        const cid = directusConversationId;
+        const [conv, rows] = await Promise.all([
+          getConversation(cid),
+          getConversationMessages(cid),
+        ]);
+        if (!active) return;
+        const lane = resolveDirectusConversationLane(conv);
+        const hubHuman = lane === "human";
+        directusHumanLaneRef.current = hubHuman;
+        setDirectusHumanLane(hubHuman);
+
+        setMessages((prev) => {
+          const knownFp = fingerprintSetFromRenderableAssistantBubbles(prev);
+          const nextAdds: Message[] = [];
+
+          const sortedRows = [...rows].sort(
+            (a, b) => parseDirectusInstant(a).getTime() - parseDirectusInstant(b).getTime(),
+          );
+
+          for (const row of sortedRows) {
+            const rawId = row.id;
+            const did =
+              typeof rawId === "string"
+                ? rawId
+                : typeof rawId === "number"
+                  ? String(rawId)
+                  : null;
+            if (!did || !directusInboundFromAgentPerspective(row)) continue;
+            const dk = `d-${did}`;
+            if (seenDirectusMessageIdsRef.current.has(dk)) continue;
+
+            const textRaw = directusPlainText(row);
+            const textTrim = textRaw.trim();
+            if (!textTrim) continue;
+
+            const fp = normalizeChatFingerprint(textRaw);
+            if (knownFp.has(fp)) continue;
+
+            seenDirectusMessageIdsRef.current.add(dk);
+            knownFp.add(fp);
+            nextAdds.push({
+              id: dk,
+              text: textTrim,
+              isUser: false,
+              timestamp: parseDirectusInstant(row),
+            });
+          }
+          return nextAdds.length ? [...prev, ...nextAdds] : prev;
+        });
+      }
+      catch (e) {
+        console.warn("[directus] polling", e);
+      }
+    };
+
+    void tick();
+    const interval = window.setInterval(tick, 3000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [directusConversationId]);
+
+  useEffect(() => {
     if (isSupabaseConfigured) {
       supabase.from("bot_settings").select("value").eq("key", "welcome_message").maybeSingle()
         .then(({ data }) => { if (data?.value) setWelcome(String(data.value)); });
@@ -399,7 +558,56 @@ export const Chatbot = () => {
     return () => { active = false; clearInterval(t); };
   }, [humanMode, chatwootLive, conversationId]);
 
+  const persistOutboundUserBubble = async (displayedBubble: string) => {
+    if (!isDirectusConfigured || !displayedBubble.trim()) return;
+    try {
+      let id = directusConversationIdRef.current;
+      if (!id) {
+        id = await ensureDirectusConversation(getVisitorId());
+        setDirectusConversationId(id);
+        localStorage.setItem("he_directus_conversation_id", id);
+        directusConversationIdRef.current = id;
+      }
+      const mid = await saveUserMessage(id, displayedBubble.trim());
+      if (mid) seenDirectusMessageIdsRef.current.add(`d-${mid}`);
+    }
+    catch (e) {
+      console.warn("[directus] guardar mensagem do utilizador falhou", e);
+    }
+  };
+
+  const persistInboundAssistantBubble = async (assistantPlain: string) => {
+    if (!isDirectusConfigured) return;
+    const trimmed = (assistantPlain || "").trim();
+    if (!trimmed || trimmed === "(sem resposta)") return;
+    try {
+      let id = directusConversationIdRef.current;
+      if (!id) {
+        id = await ensureDirectusConversation(getVisitorId());
+        setDirectusConversationId(id);
+        localStorage.setItem("he_directus_conversation_id", id);
+        directusConversationIdRef.current = id;
+      }
+      const mid = await saveAiMessage(id, trimmed);
+      if (mid) seenDirectusMessageIdsRef.current.add(`d-${mid}`);
+    }
+    catch (e) {
+      console.warn("[directus] guardar resposta do assistente falhou", e);
+    }
+  };
+
+  const announceHandoffToDirectus = (channelHint?: string) => {
+    const dId = directusConversationIdRef.current;
+    if (!isDirectusConfigured || !dId) return;
+    requestHumanHandoff(dId, undefined, undefined, channelHint).catch((e) => {
+      console.warn("[directus] pedido de handoff falhou", e);
+    });
+  };
+
   const sendToBackend = async (text: string, intentOverride?: string) => {
+    if (!humanMode && directusHumanLaneRef.current) {
+      return;
+    }
     setIsTyping(true);
     try {
       if (!isSupabaseConfigured) throw new Error("Supabase não configurado.");
@@ -510,6 +718,7 @@ export const Chatbot = () => {
 
         const reply = fullText || "(sem resposta)";
         setHistory(h => [...h, { role: "assistant", content: reply }]);
+        await persistInboundAssistantBubble(reply);
 
         if (finalPayload?.conversation_id) setConversationId(finalPayload.conversation_id);
         const actions: UiAction[] = Array.isArray(finalPayload?.ui_actions) ? finalPayload.ui_actions : [];
@@ -525,7 +734,12 @@ export const Chatbot = () => {
             })),
           ]);
         }
-        if (finalPayload?.mode === "human") setHumanMode(true);
+        if (finalPayload?.mode === "human") {
+          setHumanMode(true);
+          directusHumanLaneRef.current = true;
+          setDirectusHumanLane(true);
+          announceHandoffToDirectus(finalPayload.channel ?? undefined);
+        }
         if (finalPayload?.channel === "whatsapp" && finalPayload?.whatsapp_link) {
           setMessages(p => [...p, {
             id: `${baseId}-wa`,
@@ -542,6 +756,7 @@ export const Chatbot = () => {
         const reply = data.reply as string | null;
         if (reply) {
           setHistory(h => [...h, { role: "assistant", content: reply }]);
+          await persistInboundAssistantBubble(reply);
         }
         const newMsgs: Message[] = [];
         if (reply) {
@@ -568,7 +783,12 @@ export const Chatbot = () => {
         }
         setMessages(p => [...p, ...newMsgs]);
         if (reply) speak(reply);
-        if (data.mode === "human") setHumanMode(true);
+        if (data.mode === "human") {
+          setHumanMode(true);
+          directusHumanLaneRef.current = true;
+          setDirectusHumanLane(true);
+          announceHandoffToDirectus(typeof data.channel === "string" ? data.channel : undefined);
+        }
       }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
@@ -596,6 +816,7 @@ export const Chatbot = () => {
     unlockTts();
     setShowIntentMenu(false);
     pushUserMessage(text);
+    await persistOutboundUserBubble(text);
     await sendToBackend(text);
   };
 
@@ -608,6 +829,7 @@ export const Chatbot = () => {
       return;
     }
     pushUserMessage(label);
+    await persistOutboundUserBubble(label);
     await sendToBackend(label, value);
   };
 
@@ -619,6 +841,7 @@ export const Chatbot = () => {
     unlockTts();
     consumeUi(id);
     pushUserMessage(value);
+    await persistOutboundUserBubble(value);
     await sendToBackend(value);
   };
 
@@ -626,12 +849,15 @@ export const Chatbot = () => {
     unlockTts();
     consumeUi(id);
     pushUserMessage(label);
+    await persistOutboundUserBubble(label);
     await sendToBackend(value);
   };
 
   const hasPendingInput = messages.some(
     m => m.ui && !m.consumed && m.ui.type === "request_input"
   );
+
+  const suppressInputLegacyHuman = humanMode && !directusHumanLane;
 
   return (
     <div className="flex flex-col h-full max-w-full bg-background">
@@ -641,10 +867,16 @@ export const Chatbot = () => {
         speaking={speaking}
         onToggleTts={() => setTtsEnabled(v => !v)}
       />
-      {humanMode && (
+      {(humanMode || directusHumanLane) && (
         <div className="px-4 py-2 border-b bg-muted/40 flex items-center gap-2">
-          <Badge variant="default" className="bg-green-600 hover:bg-green-700">🟢 Agente humano</Badge>
-          <span className="text-xs text-muted-foreground">Estás a falar com a equipa HotelEquip.</span>
+          <Badge variant="default" className={directusHumanLane ? "bg-indigo-600 hover:bg-indigo-700" : "bg-green-600 hover:bg-green-700"}>
+            {directusHumanLane ? "A falar com agente humano" : "🟢 Agente humano"}
+          </Badge>
+          <span className="text-xs text-muted-foreground">
+            {directusHumanLane
+              ? "O agente responde pelo Communication Hub."
+              : "Estás a falar com a equipa HotelEquip."}
+          </span>
         </div>
       )}
       <ScrollArea ref={scrollAreaRef} className="flex-1 p-4">
@@ -675,7 +907,7 @@ export const Chatbot = () => {
             return <ChatMessage key={m.id} message={m.text} isUser={m.isUser} timestamp={m.timestamp} />;
           })}
 
-          {showIntentMenu && !humanMode && (
+          {showIntentMenu && !humanMode && !directusHumanLane && (
             <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
               <p className="text-sm font-medium">No que posso ajudar hoje?</p>
               <div className="flex flex-col gap-2">
@@ -702,7 +934,7 @@ export const Chatbot = () => {
       <ChatInput
         onSendMessage={handleSendMessage}
         onMicStart={handleMicStart}
-        disabled={isTyping || humanMode || hasPendingInput}
+        disabled={isTyping || suppressInputLegacyHuman || hasPendingInput}
         pendingInput={hasPendingInput}
       />
     </div>

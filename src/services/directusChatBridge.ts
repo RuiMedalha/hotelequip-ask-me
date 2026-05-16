@@ -16,6 +16,13 @@ function coerceId(record: Record<string, unknown>, context: string): string {
   throw new Error(`${context}: resposta Directus sem id válido.`);
 }
 
+function peekCreatedMessageId(record: Record<string, unknown>): string | undefined {
+  const id = record?.id;
+  if (typeof id === "string") return id;
+  if (typeof id === "number") return String(id);
+  return undefined;
+}
+
 /**
  * Garante uma linha `conversations` no Directus para o visitante (idempotente por `visitor_id`).
  */
@@ -36,22 +43,30 @@ export async function ensureDirectusConversation(visitorId: string): Promise<str
   return coerceId(created.data, "ensureDirectusConversation(create)");
 }
 
-export async function saveUserMessage(conversationId: string, content: string) {
+export async function saveUserMessage(
+  conversationId: string,
+  content: string,
+): Promise<string | undefined> {
   requireDirectusConfigured();
-  await createMessage({
+  const res = await createMessage({
     [DIRECTUS_MESSAGE_CONVERSATION_FK]: conversationId,
     role: "user",
     content,
   });
+  return peekCreatedMessageId(res.data);
 }
 
-export async function saveAiMessage(conversationId: string, content: string) {
+export async function saveAiMessage(
+  conversationId: string,
+  content: string,
+): Promise<string | undefined> {
   requireDirectusConfigured();
-  await createMessage({
+  const res = await createMessage({
     [DIRECTUS_MESSAGE_CONVERSATION_FK]: conversationId,
     role: "assistant",
     content,
   });
+  return peekCreatedMessageId(res.data);
 }
 
 /**
