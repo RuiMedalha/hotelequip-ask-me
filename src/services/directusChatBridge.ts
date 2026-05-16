@@ -1,13 +1,27 @@
 import {
   createConversation,
-  findConversationByVisitorId,
+  findLatestConversationByVisitorId,
   getConversation,
   updateConversation,
 } from "@/integrations/directus/conversations";
 import { createMessage } from "@/integrations/directus/messages";
 import { isDirectusConfigured } from "@/integrations/directus/client";
 import { extractPhone, looksLikePersonName } from "@/lib/chatCustomerDetails";
+import {
+  CONVERSATION_STATUS,
+  isConversationActive,
+  isConversationClosed,
+} from "@/lib/directusConversationLifecycle";
 import type { DirectusConversationPayload, DirectusMessagePayload } from "@/types/directus";
+
+export type EnsureDirectusConversationResult = {
+  conversationId: string;
+  /** true quando uma conversa fechada foi reaberta para este visitante. */
+  reopened: boolean;
+};
+
+export { CONVERSATION_STATUS } from "@/lib/directusConversationLifecycle";
+export { DIRECTUS_REOPEN_SYSTEM_MESSAGE } from "@/lib/directusConversationLifecycle";
 
 function logDirectusDev(...args: unknown[]) {
   if (import.meta.env.DEV) console.info(...args);
@@ -63,28 +77,112 @@ async function touchConversationAfterAiMessage(conversationId: string, content: 
   });
 }
 
-/**
- * Garante uma linha `conversations` no Directus para o visitante (idempotente por `visitor_id`).
- */
-export async function ensureDirectusConversation(visitorId: string): Promise<string> {
-  requireDirectusConfigured();
-
-  const existing = await findConversationByVisitorId(visitorId);
-  if (existing) return coerceId(existing, "ensureDirectusConversation(existing)");
-
+async function createNewDirectusConversation(visitorId: string): Promise<string> {
   const payload: DirectusConversationPayload = {
     visitor_id: visitorId,
     customer_name: "Visitante do site",
     channel: "askme",
-    status: "ai_active",
+    status: CONVERSATION_STATUS.AI_ACTIVE,
     mode: "bot",
     ai_enabled: true,
     source: "ask_me",
     unread_count: 0,
   };
-
   const created = await createConversation(payload);
-  return coerceId(created.data, "ensureDirectusConversation(create)");
+  return coerceId(created.data, "createNewDirectusConversation");
+}
+
+/**
+ * Reabre conversa fechada mantendo visitor_id, contact_id, customer_name, phone, email.
+ */
+export async function reopenClosedDirectusConversation(conversationId: string) {
+  requireDirectusConfigured();
+  const conv = await getConversation(conversationId);
+  const priorUnread = parseUnreadCount(conv);
+  await updateConversation(conversationId, {
+    status: CONVERSATION_STATUS.AI_ACTIVE,
+    mode: "bot",
+    ai_enabled: true,
+    unread_count: priorUnread > 0 ? priorUnread + 1 : 1,
+    updated_at: new Date().toISOString(),
+  });
+  logDirectusDev("[Directus] conversation reopened", conversationId);
+}
+
+/**
+ * Garante conversa Directus para o visitante: reutiliza activa ou reabre fechada; senão cria nova.
+ */
+export async function ensureDirectusConversationWithMeta(
+  visitorId: string,
+): Promise<EnsureDirectusConversationResult> {
+  requireDirectusConfigured();
+
+  const existing = await findLatestConversationByVisitorId(visitorId);
+  if (existing) {
+    const id = coerceId(existing, "ensureDirectusConversation(existing)");
+    if (isConversationClosed(existing)) {
+      await reopenClosedDirectusConversation(id);
+      return { conversationId: id, reopened: true };
+    }
+    if (isConversationActive(existing)) {
+      return { conversationId: id, reopened: false };
+    }
+    await reopenClosedDirectusConversation(id);
+    return { conversationId: id, reopened: true };
+  }
+
+  const id = await createNewDirectusConversation(visitorId);
+  return { conversationId: id, reopened: false };
+}
+
+/** @inheritdoc ensureDirectusConversationWithMeta */
+export async function ensureDirectusConversation(visitorId: string): Promise<string> {
+  const { conversationId } = await ensureDirectusConversationWithMeta(visitorId);
+  return conversationId;
+}
+
+/** Hub: encerrar conversa. */
+export async function closeDirectusConversation(conversationId: string) {
+  requireDirectusConfigured();
+  await updateConversation(conversationId, {
+    status: CONVERSATION_STATUS.CLOSED,
+    ai_enabled: false,
+    unread_count: 0,
+    updated_at: new Date().toISOString(),
+  });
+  logDirectusDev("[Directus] conversation closed", conversationId);
+}
+
+/** Hub: reabrir conversa (atalho). */
+export async function reopenDirectusConversation(conversationId: string) {
+  await reopenClosedDirectusConversation(conversationId);
+}
+
+/** Hub: reativar IA na conversa. */
+export async function reactivateAiOnDirectusConversation(conversationId: string) {
+  requireDirectusConfigured();
+  await updateConversation(conversationId, {
+    status: CONVERSATION_STATUS.AI_ACTIVE,
+    mode: "bot",
+    ai_enabled: true,
+    assigned_to: null,
+    updated_at: new Date().toISOString(),
+  });
+  logDirectusDev("[Directus] AI reactivated on conversation", conversationId);
+}
+
+/** Hub: operador assume a conversa. */
+export async function assumeDirectusConversation(conversationId: string, assignedTo?: string) {
+  requireDirectusConfigured();
+  const patch: DirectusConversationPayload = {
+    status: CONVERSATION_STATUS.HUMAN_ACTIVE,
+    mode: "human",
+    ai_enabled: false,
+    updated_at: new Date().toISOString(),
+  };
+  if (assignedTo?.trim()) patch.assigned_to = assignedTo.trim();
+  await updateConversation(conversationId, patch);
+  logDirectusDev("[Directus] conversation assumed", conversationId, assignedTo);
 }
 
 export async function updateDirectusConversation(
@@ -189,11 +287,13 @@ export async function requestHumanHandoff(
   requireDirectusConfigured();
 
   const payload: DirectusConversationPayload = {
-    status: "handoff",
+    status: CONVERSATION_STATUS.HUMAN_ACTIVE,
     mode: "human",
+    ai_enabled: false,
     handoff_reason: reason,
     handoff_summary: summary,
     channel,
+    updated_at: new Date().toISOString(),
   };
 
   await updateConversation(conversationId, payload);

@@ -6,6 +6,9 @@ export interface DirectusConversationPayload {
   visitor_id?: string;
   customer_name?: string;
   phone?: string;
+  email?: string;
+  contact_id?: string;
+  assigned_to?: string | null;
   status?: string;
   mode?: string;
   channel?: string;

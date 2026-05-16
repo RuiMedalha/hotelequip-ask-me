@@ -11,12 +11,13 @@ import { supabase, FUNCTIONS_URL, SUPABASE_ANON_KEY, isSupabaseConfigured } from
 import { isDirectusConfigured } from "@/integrations/directus/client";
 import { getConversation, getConversationMessages } from "@/integrations/directus/conversations";
 import {
-  ensureDirectusConversation,
+  ensureDirectusConversationWithMeta,
   saveUserMessage,
   saveAiMessage,
   requestHumanHandoff,
   syncCustomerDetailsFromUserMessage,
 } from "@/services/directusChatBridge";
+import { DIRECTUS_REOPEN_SYSTEM_MESSAGE } from "@/lib/directusConversationLifecycle";
 import { isExplicitHumanRequest } from "@/lib/chatCustomerDetails";
 import { uuid } from "@/lib/uuid";
 
@@ -145,9 +146,10 @@ function readDirectusConvSnapshot(conv: Record<string, unknown> | null): Directu
   };
 }
 
-/** Lane remota Hub: humano vs IA (prioridade status → mode → ai_enabled). */
+/** Lane remota Hub: humano vs IA; `null` se conversa fechada ou estado indeterminado. */
 function computeDirectusLane(snapshot: DirectusConvSnapshot): "human" | "bot" | null {
   const { status, mode, aiEnabled } = snapshot;
+  if (status === "closed" || status === "resolved") return null;
   if (status === "human_active" || mode === "human" || aiEnabled === false) return "human";
   if (status === "ai_active" || mode === "bot" || aiEnabled === true) return "bot";
   return null;
@@ -444,34 +446,6 @@ export const Chatbot = () => {
     directusHumanLaneRef.current = directusHumanLane;
   }, [directusHumanLane]);
 
-  useEffect(() => {
-    if (!isDirectusConfigured) {
-      if (import.meta.env.DEV) {
-        warnDirectusDev(
-          "[Directus] inativo — defina VITE_DIRECTUS_URL e VITE_DIRECTUS_TOKEN em .env.local e reinicie o dev server",
-        );
-      }
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const id = await ensureDirectusConversation(getVisitorId());
-        if (cancelled) return;
-        setDirectusConversationId(id);
-        localStorage.setItem("he_directus_conversation_id", id);
-        directusConversationIdRef.current = id;
-        logDirectusDev("[Directus] conversation ready", id);
-      }
-      catch (e) {
-        warnDirectusDev("[Directus] conversation ready failed", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const appendDirectusSystemMessage = (text: string) => {
     const fp = normalizeChatFingerprint(text);
     if (seenSystemLaneMessagesRef.current.has(fp)) return;
@@ -487,6 +461,35 @@ export const Chatbot = () => {
       },
     ]);
   };
+
+  useEffect(() => {
+    if (!isDirectusConfigured) {
+      if (import.meta.env.DEV) {
+        warnDirectusDev(
+          "[Directus] inativo — defina VITE_DIRECTUS_URL e VITE_DIRECTUS_TOKEN em .env.local e reinicie o dev server",
+        );
+      }
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { conversationId: id, reopened } = await ensureDirectusConversationWithMeta(getVisitorId());
+        if (cancelled) return;
+        setDirectusConversationId(id);
+        localStorage.setItem("he_directus_conversation_id", id);
+        directusConversationIdRef.current = id;
+        logDirectusDev("[Directus] conversation ready", id, reopened ? "(reopened)" : "");
+        if (reopened) appendDirectusSystemMessage(DIRECTUS_REOPEN_SYSTEM_MESSAGE);
+      }
+      catch (e) {
+        warnDirectusDev("[Directus] conversation ready failed", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     previousStatusRef.current = null;
@@ -512,8 +515,21 @@ export const Chatbot = () => {
         const snapshot = readDirectusConvSnapshot(conv);
         const lane = computeDirectusLane(snapshot);
         const hubHuman = lane === "human";
-        directusHumanLaneRef.current = hubHuman;
-        setDirectusHumanLane(hubHuman);
+        const isClosed = snapshot.status === "closed" || snapshot.status === "resolved";
+
+        if (isClosed) {
+          directusHumanLaneRef.current = false;
+          setDirectusHumanLane(false);
+        }
+        else {
+          directusHumanLaneRef.current = hubHuman;
+          setDirectusHumanLane(hubHuman);
+        }
+
+        const prevStatus = previousStatusRef.current;
+        if (isClosed && prevStatus && prevStatus !== "closed" && prevStatus !== "resolved") {
+          logDirectusDev("[Directus] conversation closed (hub)");
+        }
 
         const prevLane = previousLaneRef.current;
         if (prevLane !== null && lane !== null && prevLane !== lane) {
@@ -692,8 +708,9 @@ export const Chatbot = () => {
   const ensureDirectusConversationReady = async (): Promise<string | null> => {
     if (!isDirectusConfigured) return null;
     try {
-      const id = await ensureDirectusConversation(getVisitorId());
+      const { conversationId: id, reopened } = await ensureDirectusConversationWithMeta(getVisitorId());
       bindDirectusConversationId(id);
+      if (reopened) appendDirectusSystemMessage(DIRECTUS_REOPEN_SYSTEM_MESSAGE);
       return id;
     }
     catch (e) {
@@ -771,9 +788,10 @@ export const Chatbot = () => {
     if (!trimmed || !isDirectusConfigured) return;
 
     try {
-      const directusId =
-        directusConversationIdRef.current ?? await ensureDirectusConversationReady();
-      if (!directusId) return;
+      const { conversationId: directusId, reopened } =
+        await ensureDirectusConversationWithMeta(getVisitorId());
+      bindDirectusConversationId(directusId);
+      if (reopened) appendDirectusSystemMessage(DIRECTUS_REOPEN_SYSTEM_MESSAGE);
 
       const mid = await saveUserMessage(directusId, trimmed);
       if (mid) seenDirectusMessageIdsRef.current.add(`d-${mid}`);

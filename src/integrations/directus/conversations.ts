@@ -39,17 +39,24 @@ export async function getConversation(id: string): Promise<Record<string, unknow
   );
 }
 
-export async function findConversationByVisitorId(
+/** Última conversa do visitante (mais recente por updated_at). */
+export async function findLatestConversationByVisitorId(
   visitorId: string,
 ): Promise<Record<string, unknown> | null> {
   const collection = DIRECTUS_COLLECTIONS.conversations;
   const qs = new URLSearchParams();
   qs.set(`filter[${VISITOR_FIELD}][_eq]`, visitorId);
+  qs.set("sort", "-updated_at");
   qs.set("limit", "1");
   const rows = await readDirectusList<Record<string, unknown>>(
     `/items/${encodeURIComponent(collection)}?${qs.toString()}`,
   );
   return rows[0] ?? null;
+}
+
+/** @deprecated Use findLatestConversationByVisitorId */
+export async function findConversationByVisitorId(visitorId: string) {
+  return findLatestConversationByVisitorId(visitorId);
 }
 
 export async function getConversationMessages(conversationId: string) {
