@@ -10,6 +10,8 @@ export interface DirectusConversationPayload {
   channel?: string;
   ai_enabled?: boolean;
   unread_count?: number;
+  last_message?: string;
+  updated_at?: string;
   summary?: string;
   /** Motivo relatado pelo cliente / ferramentas (equivalente ao handoff Supabase). */
   handoff_reason?: string;

@@ -1,4 +1,9 @@
-import { createConversation, findConversationByVisitorId, updateConversation } from "@/integrations/directus/conversations";
+import {
+  createConversation,
+  findConversationByVisitorId,
+  getConversation,
+  updateConversation,
+} from "@/integrations/directus/conversations";
 import { createMessage } from "@/integrations/directus/messages";
 import { isDirectusConfigured } from "@/integrations/directus/client";
 import type { DirectusConversationPayload, DirectusMessagePayload } from "@/types/directus";
@@ -27,6 +32,34 @@ function peekCreatedMessageId(record: Record<string, unknown>): string | undefin
   if (typeof id === "string") return id;
   if (typeof id === "number") return String(id);
   return undefined;
+}
+
+function parseUnreadCount(conv: Record<string, unknown> | null): number {
+  const raw = conv?.unread_count;
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.max(0, Math.floor(raw));
+  if (typeof raw === "string") {
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isNaN(n)) return Math.max(0, n);
+  }
+  return 0;
+}
+
+async function touchConversationAfterUserMessage(conversationId: string, content: string) {
+  const trimmed = content.trim();
+  const conv = await getConversation(conversationId);
+  await updateConversation(conversationId, {
+    last_message: trimmed,
+    updated_at: new Date().toISOString(),
+    unread_count: parseUnreadCount(conv) + 1,
+  });
+}
+
+async function touchConversationAfterAiMessage(conversationId: string, content: string) {
+  const trimmed = content.trim();
+  await updateConversation(conversationId, {
+    last_message: trimmed,
+    updated_at: new Date().toISOString(),
+  });
 }
 
 /**
@@ -67,7 +100,15 @@ export async function saveUserMessage(
   logDirectusDev("[Directus] creating message payload", payload);
   const res = await createMessage(payload);
   logDirectusDev("[Directus] message created", res.data);
-  return peekCreatedMessageId(res.data);
+  const messageId = peekCreatedMessageId(res.data);
+  try {
+    await touchConversationAfterUserMessage(conversationId, content);
+    logDirectusDev("[Directus] conversation touched after user message");
+  }
+  catch (e) {
+    if (import.meta.env.DEV) console.warn("[Directus] conversation touch after user message failed", e);
+  }
+  return messageId;
 }
 
 export async function saveAiMessage(
@@ -84,7 +125,15 @@ export async function saveAiMessage(
   logDirectusDev("[Directus] creating message payload", payload);
   const res = await createMessage(payload);
   logDirectusDev("[Directus] message created", res.data);
-  return peekCreatedMessageId(res.data);
+  const messageId = peekCreatedMessageId(res.data);
+  try {
+    await touchConversationAfterAiMessage(conversationId, content);
+    logDirectusDev("[Directus] conversation touched after ai message");
+  }
+  catch (e) {
+    if (import.meta.env.DEV) console.warn("[Directus] conversation touch after ai message failed", e);
+  }
+  return messageId;
 }
 
 /**
