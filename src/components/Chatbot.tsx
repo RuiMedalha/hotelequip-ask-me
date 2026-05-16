@@ -16,6 +16,7 @@ import {
   saveAiMessage,
   requestHumanHandoff,
 } from "@/services/directusChatBridge";
+import { uuid } from "@/lib/uuid";
 
 type UiAction =
   | { type: "request_input"; input_type: "email" | "phone"; message: string }
@@ -120,7 +121,7 @@ function parseDirectusInstant(row: Record<string, unknown>) {
 
 function getVisitorId() {
   let v = localStorage.getItem("he_visitor_id");
-  if (!v) { v = crypto.randomUUID(); localStorage.setItem("he_visitor_id", v); }
+  if (!v) { v = uuid(); localStorage.setItem("he_visitor_id", v); }
   return v;
 }
 
