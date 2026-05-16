@@ -1,11 +1,17 @@
 import { createConversation, findConversationByVisitorId, updateConversation } from "@/integrations/directus/conversations";
-import { createMessage, DIRECTUS_MESSAGE_CONVERSATION_FK } from "@/integrations/directus/messages";
+import { createMessage } from "@/integrations/directus/messages";
 import { isDirectusConfigured } from "@/integrations/directus/client";
-import type { DirectusConversationPayload } from "@/types/directus";
+import type { DirectusConversationPayload, DirectusMessagePayload } from "@/types/directus";
+
+function logDirectusDev(...args: unknown[]) {
+  if (import.meta.env.DEV) console.info(...args);
+}
 
 function requireDirectusConfigured() {
   if (!isDirectusConfigured) {
-    throw new Error("Directus não está configurado (VITE_DIRECTUS_URL).");
+    throw new Error(
+      "Directus não está configurado (defina VITE_DIRECTUS_URL e VITE_DIRECTUS_TOKEN em .env.local).",
+    );
   }
 }
 
@@ -34,9 +40,13 @@ export async function ensureDirectusConversation(visitorId: string): Promise<str
 
   const payload: DirectusConversationPayload = {
     visitor_id: visitorId,
-    status: "open",
+    customer_name: "Visitante do site",
+    channel: "askme",
+    status: "ai_active",
     mode: "bot",
+    ai_enabled: true,
     source: "ask_me",
+    unread_count: 0,
   };
 
   const created = await createConversation(payload);
@@ -48,11 +58,15 @@ export async function saveUserMessage(
   content: string,
 ): Promise<string | undefined> {
   requireDirectusConfigured();
-  const res = await createMessage({
-    [DIRECTUS_MESSAGE_CONVERSATION_FK]: conversationId,
-    role: "user",
+  const payload: DirectusMessagePayload = {
+    conversation_id: conversationId,
+    sender_type: "customer",
+    sender_name: "Visitante do site",
     content,
-  });
+  };
+  logDirectusDev("[Directus] creating message payload", payload);
+  const res = await createMessage(payload);
+  logDirectusDev("[Directus] message created", res.data);
   return peekCreatedMessageId(res.data);
 }
 
@@ -61,11 +75,15 @@ export async function saveAiMessage(
   content: string,
 ): Promise<string | undefined> {
   requireDirectusConfigured();
-  const res = await createMessage({
-    [DIRECTUS_MESSAGE_CONVERSATION_FK]: conversationId,
-    role: "assistant",
+  const payload: DirectusMessagePayload = {
+    conversation_id: conversationId,
+    sender_type: "ai",
+    sender_name: "Ask Me",
     content,
-  });
+  };
+  logDirectusDev("[Directus] creating message payload", payload);
+  const res = await createMessage(payload);
+  logDirectusDev("[Directus] message created", res.data);
   return peekCreatedMessageId(res.data);
 }
 

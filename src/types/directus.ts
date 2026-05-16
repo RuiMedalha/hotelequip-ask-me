@@ -4,9 +4,12 @@
  */
 export interface DirectusConversationPayload {
   visitor_id?: string;
+  customer_name?: string;
   status?: string;
   mode?: string;
   channel?: string;
+  ai_enabled?: boolean;
+  unread_count?: number;
   summary?: string;
   /** Motivo relatado pelo cliente / ferramentas (equivalente ao handoff Supabase). */
   handoff_reason?: string;
@@ -22,12 +25,13 @@ export interface DirectusConversationPayload {
  * Mensagem gravada no Directus (persistência paralela ao Supabase até migração completa).
  */
 export interface DirectusMessagePayload {
-  /** UUID da conversa no Directus (nome da coluna pode variar: usar alias no schema). */
   conversation_id?: string;
-  /** Alguns schemas usam FK com o nome da relação Directus em vez de `conversation_id`. */
-  conversation?: string;
-  role?: "user" | "assistant" | "agent" | string;
+  sender_type?: string;
+  sender_name?: string;
   content?: string;
+  /** Legado / extensível */
+  conversation?: string;
+  role?: string;
   [key: string]: unknown;
 }
 

@@ -20,7 +20,7 @@ export async function getMessages(conversationId: string): Promise<Record<string
   const collection = DIRECTUS_COLLECTIONS.messages;
   const qs = new URLSearchParams();
   qs.set(`filter[${DIRECTUS_MESSAGE_CONVERSATION_FK}][_eq]`, conversationId);
-  qs.set("sort", "date_created");
+  qs.set("sort", "created_at");
   qs.set("limit", "-1");
   return readDirectusList<Record<string, unknown>>(
     `/items/${encodeURIComponent(collection)}?${qs.toString()}`,

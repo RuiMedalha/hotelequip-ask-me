@@ -5,7 +5,8 @@ const token = (import.meta.env.VITE_DIRECTUS_TOKEN as string | undefined)?.trim(
 
 export const directusBaseUrl = rawBase?.replace(/\/+$/, "") ?? "";
 
-export const isDirectusConfigured = Boolean(directusBaseUrl);
+/** Requer URL e token (ex.: `.env.local` com `VITE_DIRECTUS_*`). */
+export const isDirectusConfigured = Boolean(directusBaseUrl && token);
 
 /** Nomes das collections no Directus (alterar aqui se o Hub usar outros slugs). */
 export const DIRECTUS_COLLECTIONS = {
@@ -18,14 +19,38 @@ export const DIRECTUS_COLLECTIONS = {
 } as const;
 
 export class DirectusRequestError extends Error {
-  constructor(
-    message: string,
-    readonly status: number,
-    readonly body: unknown,
-  ) {
+  readonly status: number;
+
+  readonly url: string;
+
+  readonly body: unknown;
+
+  constructor(message: string, status: number, url: string, body: unknown) {
     super(message);
     this.name = "DirectusRequestError";
+    this.status = status;
+    this.url = url;
+    this.body = body;
   }
+}
+
+function formatDirectusErrorMessage(status: number, body: unknown): string {
+  if (typeof body === "object" && body !== null && "errors" in body) {
+    const errors = (body as { errors?: unknown }).errors;
+    if (Array.isArray(errors) && errors.length > 0) {
+      const parts = errors.map((entry) => {
+        if (typeof entry === "object" && entry !== null && "message" in entry) {
+          return String((entry as { message: unknown }).message);
+        }
+        return JSON.stringify(entry);
+      });
+      return `Directus error (${status}): ${parts.join("; ")}`;
+    }
+  }
+  if (typeof body === "string" && body.trim()) {
+    return `Directus request failed (${status}): ${body}`;
+  }
+  return `Directus request failed (${status})`;
 }
 
 function normalizePath(path: string): string {
@@ -84,11 +109,16 @@ export async function directusRequest<T = unknown>(
   }
 
   if (!res.ok) {
-    const msg =
-      typeof parsed === "object" && parsed !== null && "errors" in parsed
-        ? `Directus error (${res.status})`
-        : `Directus request failed (${res.status})`;
-    throw new DirectusRequestError(msg, res.status, parsed);
+    const errorBody = parsed;
+    const msg = formatDirectusErrorMessage(res.status, errorBody);
+    if (import.meta.env.DEV) {
+      console.warn("[Directus] error response", {
+        status: res.status,
+        url,
+        body: errorBody,
+      });
+    }
+    throw new DirectusRequestError(msg, res.status, url, errorBody);
   }
 
   return parsed as T;
