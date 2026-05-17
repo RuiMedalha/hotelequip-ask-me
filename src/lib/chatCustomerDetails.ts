@@ -91,6 +91,26 @@ export function isExplicitHumanRequest(text: string): boolean {
   return explicit.some((re) => re.test(t));
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Email válido na mensagem (linha inteira ou token). */
+export function extractEmail(text: string): string | null {
+  const raw = text.trim();
+  if (!raw) return null;
+  if (EMAIL_RE.test(raw)) return raw.toLowerCase();
+  const match = raw.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return match ? match[0].toLowerCase() : null;
+}
+
+/** Pedido de subscrição de newsletter (antes de ter email). */
+export function isNewsletterOptInIntent(text: string): boolean {
+  const t = foldAccents(text.trim().toLowerCase());
+  if (!t) return false;
+  const wants = /\b(sim|quero|aceito|aderir|subscrever|ok|confirmo)\b/.test(t);
+  const topic = /\b(newsletter|boletim|subscri|subscricao)\b/.test(t);
+  return topic && (wants || t.length < 40);
+}
+
 /** Extrai telefone PT; normaliza 9 dígitos (9xxxxxxxx) para +351XXXXXXXXX. */
 export function extractPhone(text: string): string | null {
   const raw = text.trim();
@@ -122,7 +142,7 @@ export function looksLikePersonName(text: string): boolean {
   const raw = text.trim();
   if (!raw || raw.length < 2 || raw.length > 60) return false;
   if (extractPhone(raw)) return false;
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return false;
+  if (extractEmail(raw)) return false;
   if (/\d/.test(raw)) return false;
 
   const norm = foldAccents(raw.toLowerCase());

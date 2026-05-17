@@ -15,10 +15,15 @@ import {
   saveUserMessage,
   saveAiMessage,
   requestHumanHandoff,
-  syncCustomerDetailsFromUserMessage,
+  captureCustomerIdentity,
+  applyNewsletterOptIn,
 } from "@/services/directusChatBridge";
 import { DIRECTUS_REOPEN_SYSTEM_MESSAGE } from "@/lib/directusConversationLifecycle";
-import { isExplicitHumanRequest } from "@/lib/chatCustomerDetails";
+import {
+  extractEmail,
+  isExplicitHumanRequest,
+  isNewsletterOptInIntent,
+} from "@/lib/chatCustomerDetails";
 import { uuid } from "@/lib/uuid";
 
 type UiAction =
@@ -328,6 +333,9 @@ export const Chatbot = () => {
   const previousAiEnabledRef = useRef<boolean | null>(null);
   const previousLaneRef = useRef<"human" | "bot" | null>(null);
   const seenSystemLaneMessagesRef = useRef<Set<string>>(new Set());
+  const pendingNewsletterOptInRef = useRef(
+    typeof localStorage !== "undefined" && localStorage.getItem("he_newsletter_pending") === "1",
+  );
   const ttsUnlockedRef = useRef(false);
   const isIOS = typeof navigator !== "undefined" && /iPhone|iPad|iPod/i.test(navigator.userAgent);
 
@@ -774,12 +782,32 @@ export const Chatbot = () => {
     );
   };
 
-  const syncDirectusCustomerDetails = async (conversationId: string, text: string) => {
+  const setPendingNewsletterOptIn = (pending: boolean) => {
+    pendingNewsletterOptInRef.current = pending;
+    if (typeof localStorage !== "undefined") {
+      if (pending) localStorage.setItem("he_newsletter_pending", "1");
+      else localStorage.removeItem("he_newsletter_pending");
+    }
+  };
+
+  const tryCompleteNewsletterWithEmail = async (
+    conversationId: string,
+    text: string,
+  ): Promise<boolean> => {
+    if (!pendingNewsletterOptInRef.current) return false;
+    const email = extractEmail(text);
+    if (!email) return false;
+
     try {
-      await syncCustomerDetailsFromUserMessage(conversationId, text);
+      const ok = await applyNewsletterOptIn(conversationId, email);
+      if (!ok) return false;
+      setPendingNewsletterOptIn(false);
+      appendDirectusSystemMessage("✅ Subscrição da newsletter confirmada com sucesso.");
+      return true;
     }
     catch (e) {
-      warnDirectusDev("[Directus] customer details sync failed", e);
+      warnDirectusDev("[Directus] newsletter opt-in failed", e);
+      return false;
     }
   };
 
@@ -797,7 +825,32 @@ export const Chatbot = () => {
       if (mid) seenDirectusMessageIdsRef.current.add(`d-${mid}`);
       logDirectusDev("[Directus] user message saved");
 
-      await syncDirectusCustomerDetails(directusId, trimmed);
+      if (await tryCompleteNewsletterWithEmail(directusId, trimmed)) {
+        await captureCustomerIdentity(directusId, trimmed);
+        return;
+      }
+
+      if (isNewsletterOptInIntent(trimmed)) {
+        setPendingNewsletterOptIn(true);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `ui-newsletter-${Date.now()}`,
+            text: "",
+            isUser: false,
+            timestamp: new Date(),
+            ui: {
+              type: "request_input",
+              input_type: "email",
+              message: "Indique o seu email para subscrever a newsletter:",
+            },
+          },
+        ]);
+        await captureCustomerIdentity(directusId, trimmed);
+        return;
+      }
+
+      await captureCustomerIdentity(directusId, trimmed);
 
       if (isExplicitHumanRequest(trimmed)) {
         activateExplicitHumanHandoff();
@@ -1037,6 +1090,20 @@ export const Chatbot = () => {
     unlockTts();
     consumeUi(id);
     pushUserMessage(value);
+
+    if (isDirectusConfigured && pendingNewsletterOptInRef.current) {
+      const directusId =
+        directusConversationIdRef.current ?? await ensureDirectusConversationReady();
+      if (directusId) {
+        await persistOutboundUserBubble(value);
+        const completed = await tryCompleteNewsletterWithEmail(directusId, value);
+        if (completed) {
+          await captureCustomerIdentity(directusId, value);
+          return;
+        }
+      }
+    }
+
     await persistOutboundUserBubble(value);
     await sendToBackend(value);
   };

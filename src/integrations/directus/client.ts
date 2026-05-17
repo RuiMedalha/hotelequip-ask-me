@@ -16,6 +16,9 @@ export const DIRECTUS_COLLECTIONS = {
   messages:
     ((import.meta.env.VITE_DIRECTUS_MESSAGES_COLLECTION as string | undefined)?.trim())
     || "messages",
+  contacts:
+    ((import.meta.env.VITE_DIRECTUS_CONTACTS_COLLECTION as string | undefined)?.trim())
+    || "contacts",
 } as const;
 
 export class DirectusRequestError extends Error {

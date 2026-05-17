@@ -5,9 +5,7 @@
 export interface DirectusConversationPayload {
   visitor_id?: string;
   customer_name?: string;
-  phone?: string;
-  email?: string;
-  contact_id?: string;
+  contact_id?: string | number | null;
   assigned_to?: string | null;
   status?: string;
   mode?: string;
@@ -44,3 +42,25 @@ export interface DirectusMessagePayload {
 export type DirectusSingleItemResponse<T> = { data: T };
 
 export type DirectusListResponse<T> = { data: T[] };
+
+/** Collection `contacts` (CRM / Cliente 360). */
+export interface DirectusContactPayload {
+  company_name?: string;
+  contact_name?: string;
+  full_name?: string;
+  firstname?: string;
+  lastname?: string;
+  phone?: string;
+  email?: string;
+  whatsapp_number?: string;
+  accept_newsletter?: boolean;
+  newsletter_consent_at?: string;
+  newsletter_consent_source?: string;
+  newsletter_source?: string;
+  subscribed_at?: string;
+  source?: string;
+  last_seen_at?: string;
+  status?: string;
+  notes?: string;
+  [key: string]: unknown;
+}
