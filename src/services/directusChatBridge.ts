@@ -11,6 +11,8 @@ import {
   isConversationActive,
   isConversationClosed,
 } from "@/lib/directusConversationLifecycle";
+import { lastMessageLabelForMedia } from "@/lib/fileMedia";
+import type { MediaContentType, MessageAttachment } from "@/types/media";
 import type { DirectusConversationPayload, DirectusMessagePayload } from "@/types/directus";
 
 export type EnsureDirectusConversationResult = {
@@ -58,11 +60,15 @@ function parseUnreadCount(conv: Record<string, unknown> | null): number {
   return 0;
 }
 
-async function touchConversationAfterUserMessage(conversationId: string, content: string) {
-  const trimmed = content.trim();
+async function touchConversationAfterUserMessage(
+  conversationId: string,
+  content: string,
+  contentType: MediaContentType = "text",
+) {
+  const label = lastMessageLabelForMedia(contentType, content);
   const conv = await getConversation(conversationId);
   await updateConversation(conversationId, {
-    last_message: trimmed,
+    last_message: label,
     updated_at: new Date().toISOString(),
     unread_count: parseUnreadCount(conv) + 1,
   });
@@ -207,19 +213,43 @@ export async function saveUserMessage(
   conversationId: string,
   content: string,
 ): Promise<string | undefined> {
+  return saveUserMediaMessage(conversationId, {
+    content,
+    content_type: "text",
+    attachments: [],
+  });
+}
+
+export async function saveUserMediaMessage(
+  conversationId: string,
+  options: {
+    content?: string;
+    content_type: MediaContentType;
+    attachments: MessageAttachment[];
+  },
+): Promise<string | undefined> {
   requireDirectusConfigured();
+  const content = options.content?.trim() ?? "";
   const payload: DirectusMessagePayload = {
     conversation_id: conversationId,
     sender_type: "customer",
     sender_name: "Visitante do site",
-    content,
+    content: content || lastMessageLabelForMedia(options.content_type),
+    content_type: options.content_type,
+    attachments: options.attachments,
   };
-  logDirectusDev("[Directus] creating message payload", payload);
+  logDirectusDev("[Directus] creating message payload", {
+    ...payload,
+    attachments: options.attachments.map((a) => ({
+      ...a,
+      base64: a.base64 ? `[${a.base64.length} chars]` : null,
+    })),
+  });
   const res = await createMessage(payload);
   logDirectusDev("[Directus] message created", res.data);
   const messageId = peekCreatedMessageId(res.data);
   try {
-    await touchConversationAfterUserMessage(conversationId, content);
+    await touchConversationAfterUserMessage(conversationId, content, options.content_type);
     logDirectusDev("[Directus] conversation touched after user message");
   }
   catch (e) {

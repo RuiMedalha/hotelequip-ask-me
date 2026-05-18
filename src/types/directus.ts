@@ -33,6 +33,8 @@ export interface DirectusMessagePayload {
   sender_type?: string;
   sender_name?: string;
   content?: string;
+  content_type?: string;
+  attachments?: unknown;
   /** Legado / extensível */
   conversation?: string;
   role?: string;

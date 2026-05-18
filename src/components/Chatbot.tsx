@@ -13,11 +13,15 @@ import { getConversation, getConversationMessages } from "@/integrations/directu
 import {
   ensureDirectusConversationWithMeta,
   saveUserMessage,
+  saveUserMediaMessage,
   saveAiMessage,
   requestHumanHandoff,
   captureCustomerIdentity,
   applyNewsletterOptIn,
 } from "@/services/directusChatBridge";
+import type { MediaContentType, MessageAttachment, OutboundMediaPayload } from "@/types/media";
+import { directusRowToAttachments, readDirectusMessageContentType } from "@/lib/messageAttachments";
+import { lastMessageLabelForMedia } from "@/lib/fileMedia";
 import { DIRECTUS_REOPEN_SYSTEM_MESSAGE } from "@/lib/directusConversationLifecycle";
 import {
   extractEmail,
@@ -40,6 +44,9 @@ interface Message {
   consumed?: boolean;
   /** Aviso local (transição humano ↔ IA no Hub). */
   system?: boolean;
+  attachments?: MessageAttachment[];
+  contentType?: MediaContentType;
+  sending?: boolean;
 }
 
 interface StoredMessageRow {
@@ -98,10 +105,17 @@ function normalizeChatFingerprint(text: string) {
 function fingerprintSetFromRenderableAssistantBubbles(messages: Message[]) {
   const s = new Set<string>();
   for (const m of messages) {
-    if (m.isUser || m.ui || m.system || !String(m.text || "").trim()) continue;
+    if (m.isUser || m.ui || m.system || (m.attachments?.length ?? 0) > 0) continue;
+    if (!String(m.text || "").trim()) continue;
     s.add(normalizeChatFingerprint(m.text));
   }
   return s;
+}
+
+function messageHasRenderableContent(m: Message) {
+  if (m.ui || m.system) return Boolean(m.text?.trim());
+  if ((m.attachments?.length ?? 0) > 0) return true;
+  return Boolean(m.text?.trim());
 }
 
 const DIRECTUS_SYSTEM_MSG_AI_REACTIVATED =
@@ -317,6 +331,7 @@ export const Chatbot = () => {
   );
   const [directusHumanLane, setDirectusHumanLane] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [mediaUploading, setMediaUploading] = useState(false);
   const [welcome, setWelcome] = useState("Olá! 👋 Sou o assistente da HotelEquip. Como posso ajudar?");
   const [humanMode, setHumanMode] = useState(false);
   const [chatwootLive, setChatwootLive] = useState(false);
@@ -577,20 +592,27 @@ export const Chatbot = () => {
             const dk = `d-${did}`;
             if (seenDirectusMessageIdsRef.current.has(dk)) continue;
 
+            const attachments = directusRowToAttachments(row);
+            const contentType = readDirectusMessageContentType(row);
             const textRaw = directusPlainText(row);
             const textTrim = textRaw.trim();
-            if (!textTrim) continue;
+            const hasMedia = attachments.length > 0;
+            if (!textTrim && !hasMedia) continue;
 
-            const fp = normalizeChatFingerprint(textRaw);
-            if (knownFp.has(fp)) continue;
+            if (textTrim && !hasMedia) {
+              const fp = normalizeChatFingerprint(textRaw);
+              if (knownFp.has(fp)) continue;
+              knownFp.add(fp);
+            }
 
             seenDirectusMessageIdsRef.current.add(dk);
-            knownFp.add(fp);
             nextAdds.push({
               id: dk,
-              text: textTrim,
+              text: textTrim || lastMessageLabelForMedia(contentType),
               isUser: false,
               timestamp: parseDirectusInstant(row),
+              attachments: hasMedia ? attachments : undefined,
+              contentType: hasMedia ? contentType : undefined,
             });
           }
           return nextAdds.length ? [...prev, ...nextAdds] : prev;
@@ -811,6 +833,39 @@ export const Chatbot = () => {
     }
   };
 
+  const runDirectusPostUserMessageSideEffects = async (directusId: string, trimmed: string) => {
+    if (await tryCompleteNewsletterWithEmail(directusId, trimmed)) {
+      await captureCustomerIdentity(directusId, trimmed);
+      return;
+    }
+
+    if (isNewsletterOptInIntent(trimmed)) {
+      setPendingNewsletterOptIn(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `ui-newsletter-${Date.now()}`,
+          text: "",
+          isUser: false,
+          timestamp: new Date(),
+          ui: {
+            type: "request_input",
+            input_type: "email",
+            message: "Indique o seu email para subscrever a newsletter:",
+          },
+        },
+      ]);
+      await captureCustomerIdentity(directusId, trimmed);
+      return;
+    }
+
+    await captureCustomerIdentity(directusId, trimmed);
+
+    if (isExplicitHumanRequest(trimmed)) {
+      activateExplicitHumanHandoff();
+    }
+  };
+
   const persistDirectusUserTurn = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || !isDirectusConfigured) return;
@@ -825,39 +880,78 @@ export const Chatbot = () => {
       if (mid) seenDirectusMessageIdsRef.current.add(`d-${mid}`);
       logDirectusDev("[Directus] user message saved");
 
-      if (await tryCompleteNewsletterWithEmail(directusId, trimmed)) {
-        await captureCustomerIdentity(directusId, trimmed);
-        return;
-      }
-
-      if (isNewsletterOptInIntent(trimmed)) {
-        setPendingNewsletterOptIn(true);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `ui-newsletter-${Date.now()}`,
-            text: "",
-            isUser: false,
-            timestamp: new Date(),
-            ui: {
-              type: "request_input",
-              input_type: "email",
-              message: "Indique o seu email para subscrever a newsletter:",
-            },
-          },
-        ]);
-        await captureCustomerIdentity(directusId, trimmed);
-        return;
-      }
-
-      await captureCustomerIdentity(directusId, trimmed);
-
-      if (isExplicitHumanRequest(trimmed)) {
-        activateExplicitHumanHandoff();
-      }
+      await runDirectusPostUserMessageSideEffects(directusId, trimmed);
     }
     catch (e) {
       warnDirectusDev("[Directus] user message save failed", e);
+    }
+  };
+
+  const persistDirectusMediaTurn = async (payload: OutboundMediaPayload) => {
+    if (!isDirectusConfigured) return;
+
+    try {
+      const { conversationId: directusId, reopened } =
+        await ensureDirectusConversationWithMeta(getVisitorId());
+      bindDirectusConversationId(directusId);
+      if (reopened) appendDirectusSystemMessage(DIRECTUS_REOPEN_SYSTEM_MESSAGE);
+
+      const mid = await saveUserMediaMessage(directusId, {
+        content: payload.text,
+        content_type: payload.content_type,
+        attachments: payload.attachments,
+      });
+      if (mid) seenDirectusMessageIdsRef.current.add(`d-${mid}`);
+      logDirectusDev("[Directus] user media message saved");
+
+      const caption = payload.text?.trim() ?? "";
+      if (caption) await runDirectusPostUserMessageSideEffects(directusId, caption);
+    }
+    catch (e) {
+      warnDirectusDev("[Directus] user media message save failed", e);
+      throw e;
+    }
+  };
+
+  const mediaHandoffHintForType = (contentType: MediaContentType) => {
+    switch (contentType) {
+      case "image": return "imagem";
+      case "audio": return "mensagem de voz";
+      case "video": return "vídeo";
+      case "file": return "ficheiro";
+      default: return "anexo";
+    }
+  };
+
+  const respondToOutboundMedia = async (payload: OutboundMediaPayload) => {
+    if (humanMode || directusHumanLaneRef.current) return;
+
+    const kind = mediaHandoffHintForType(payload.content_type);
+    const reply =
+      `Recebi a sua ${kind}. Neste momento não consigo analisar anexos automaticamente — `
+      + "se quiser que a equipa veja o ficheiro agora, diga **humano**.";
+
+    setMessages((p) => [
+      ...p,
+      { id: `bot-media-${uuid()}`, text: reply, isUser: false, timestamp: new Date() },
+    ]);
+    await persistInboundAssistantBubble(reply);
+  };
+
+  const relayMediaLabelToHumanAgent = async (payload: OutboundMediaPayload) => {
+    if (!humanMode || !isSupabaseConfigured || !conversationId) return;
+    const label = lastMessageLabelForMedia(payload.content_type, payload.text);
+    try {
+      const r = await fetch(`${FUNCTIONS_URL}/chatwoot-relay`, {
+        method: "POST",
+        headers: await authHeaders(),
+        body: JSON.stringify({ conversation_id: conversationId, action: "send", content: label }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Erro ao enviar para agente");
+    }
+    catch (e) {
+      warnDirectusDev("[chatwoot] media label relay failed", e);
     }
   };
 
@@ -1059,6 +1153,27 @@ export const Chatbot = () => {
     }]);
   };
 
+  const pushUserMediaMessage = (
+    payload: OutboundMediaPayload,
+    opts?: { localId?: string; sending?: boolean },
+  ) => {
+    const localId = opts?.localId ?? `local-${uuid()}`;
+    const label = lastMessageLabelForMedia(payload.content_type, payload.text);
+    setMessages((p) => [
+      ...p,
+      {
+        id: localId,
+        text: payload.text?.trim() || label,
+        isUser: true,
+        timestamp: new Date(),
+        attachments: payload.attachments,
+        contentType: payload.content_type,
+        sending: opts?.sending,
+      },
+    ]);
+    return localId;
+  };
+
   const handleSendMessage = async (text: string) => {
     unlockTts();
     setShowIntentMenu(false);
@@ -1067,6 +1182,32 @@ export const Chatbot = () => {
     await persistDirectusUserTurn(text);
 
     await sendToBackend(text);
+  };
+
+  const handleSendMedia = async (payload: OutboundMediaPayload) => {
+    unlockTts();
+    setShowIntentMenu(false);
+    const localId = pushUserMediaMessage(payload, { sending: true });
+    setMediaUploading(true);
+
+    try {
+      await persistDirectusMediaTurn(payload);
+      setMessages((p) => p.map((m) => (m.id === localId ? { ...m, sending: false } : m)));
+
+      await relayMediaLabelToHumanAgent(payload);
+      await respondToOutboundMedia(payload);
+    }
+    catch (e) {
+      setMessages((p) => p.filter((m) => m.id !== localId));
+      const msg = e instanceof Error ? e.message : "Não foi possível enviar o ficheiro.";
+      setMessages((p) => [
+        ...p,
+        { id: `err-${uuid()}`, text: `⚠️ ${msg}`, isUser: false, timestamp: new Date() },
+      ]);
+    }
+    finally {
+      setMediaUploading(false);
+    }
   };
 
   const handleIntentPick = async (label: string, value: string) => {
@@ -1176,8 +1317,17 @@ export const Chatbot = () => {
                 </p>
               );
             }
-            if (!m.text) return null;
-            return <ChatMessage key={m.id} message={m.text} isUser={m.isUser} timestamp={m.timestamp} />;
+            if (!messageHasRenderableContent(m)) return null;
+            return (
+              <ChatMessage
+                key={m.id}
+                message={m.text}
+                isUser={m.isUser}
+                timestamp={m.timestamp}
+                attachments={m.attachments}
+                sending={m.sending}
+              />
+            );
           })}
 
           {showIntentMenu && !humanMode && !directusHumanLane && (
@@ -1206,8 +1356,10 @@ export const Chatbot = () => {
       </ScrollArea>
       <ChatInput
         onSendMessage={handleSendMessage}
+        onSendMedia={handleSendMedia}
         onMicStart={handleMicStart}
         disabled={isTyping || suppressInputLegacyHuman || hasPendingInput}
+        uploading={mediaUploading}
         pendingInput={hasPendingInput}
       />
     </div>
